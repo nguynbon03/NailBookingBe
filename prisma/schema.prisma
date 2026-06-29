@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      Role     @default(CUSTOMER)
+  phone     String?
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  bookings  Booking[]
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  STAFF
+  CUSTOMER
+}
+
+model Service {
+  id          String   @id @default(cuid())
+  name        String
+  category    String
+  price       Decimal  @db.Decimal(10, 2)
+  duration    Int
+  description String?
+  image       String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  bookings    BookingService[]
+}
+
+model Staff {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  phone     String?
+  role      String
+  bio       String?
+  avatar    String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  bookings  Booking[]
+}
+
+model Booking {
+  id             String        @id @default(cuid())
+  userId         String?
+  staffId        String?
+  customerName   String
+  customerPhone  String
+  customerEmail  String?
+  date           DateTime
+  time           String
+  status         BookingStatus @default(PENDING)
+  totalPrice     Decimal       @db.Decimal(10, 2)
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  user           User?         @relation(fields: [userId], references: [id])
+  staff          Staff?        @relation(fields: [staffId], references: [id])
+  services       BookingService[]
+}
+
+model BookingService {
+  id        String  @id @default(cuid())
+  bookingId String
+  serviceId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  service   Service @relation(fields: [serviceId], references: [id])
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Revenue {
+  id        String   @id @default(cuid())
+  date      DateTime
+  amount    Decimal  @db.Decimal(10, 2)
+  category  String
+  bookingId String?
+  createdAt DateTime @default(now())
+}
