@@ -13,11 +13,15 @@ model User {
   password  String
   name      String
   role      Role     @default(CUSTOMER)
-  phone     String?
-  avatar    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  bookings  Booking[]
+  phone                         String?
+  avatar                        String?
+  emailVerifiedAt               DateTime?
+  emailVerificationTokenHash    String?
+  emailVerificationExpiresAt    DateTime?
+  emailVerificationSentAt       DateTime?
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+  bookings                      Booking[]
 }
 
 enum Role {
@@ -79,6 +83,23 @@ model Notification {
   createdAt DateTime @default(now())
 }
 
+model CustomerNotification {
+  id                String    @id @default(cuid())
+  bookingId         String?
+  channel           String
+  recipient         String
+  event             String
+  subject           String?
+  message           String
+  status            String    @default("PENDING")
+  provider          String?
+  providerMessageId String?
+  error             String?
+  attempts          Int       @default(0)
+  createdAt         DateTime  @default(now())
+  sentAt            DateTime?
+}
+
 model Booking {
   id             String        @id @default(cuid())
   userId         String?
@@ -88,13 +109,18 @@ model Booking {
   customerEmail  String?
   date           DateTime
   time           String
-  status         BookingStatus @default(PENDING)
-  totalPrice     Decimal       @db.Decimal(10, 2)
-  discount       Decimal?      @db.Decimal(10, 2)
-  promoCode      String?
-  notes          String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  status                         BookingStatus @default(PENDING)
+  totalPrice                     Decimal       @db.Decimal(10, 2)
+  discount                       Decimal?      @db.Decimal(10, 2)
+  promoCode                      String?
+  emailVerifiedAt                DateTime?
+  emailVerificationTokenHash     String?
+  emailVerificationExpiresAt     DateTime?
+  emailVerificationSentAt        DateTime?
+  cancellationReason             String?
+  notes                          String?
+  createdAt                      DateTime      @default(now())
+  updatedAt                      DateTime      @updatedAt
   user           User?         @relation(fields: [userId], references: [id])
   staff          Staff?        @relation(fields: [staffId], references: [id])
   services       BookingService[]

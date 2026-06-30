@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthUser, isAdminRole } from "@/lib/auth";
 import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from "@/lib/booking-workflow";
 import { notifyBookingStatusChanged } from "@/lib/notifications";
+import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,6 +18,12 @@ const actionToStatus: Record<string, BookingStatus> = {
   no_show: "NO_SHOW",
   reopen: "PENDING",
 };
+
+function normalizeCancellationReason(value: unknown) {
+  const reason = String(value || "").trim().replace(/\s+/g, " ").slice(0, 240);
+  if (!reason || reason === "Other") return "No Reason";
+  return reason;
+}
 
 async function resolveStaffProfile(user: { email: string; role: string }) {
   if (user.role === "STAFF") {
@@ -108,9 +115,13 @@ export async function PUT(req: NextRequest) {
 
   const existing = await prisma.booking.findUnique({ where: { id }, include: { staff: true } });
   if (!existing) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
+  if (targetStatus === "CONFIRMED" && !existing.emailVerifiedAt) {
+    return NextResponse.json({ error: "Customer email is not verified yet. Ask the customer to click the verification email before confirming." }, { status: 409 });
+  }
 
-  const isAdminLike = isAdminRole(authUser.role) && authUser.role !== "STAFF";
+  const isAdminLike = isAdminRole(authUser.role);
   const extraData: Record<string, unknown> = {};
+  if (action === "cancel") extraData.cancellationReason = normalizeCancellationReason(body.cancellationReason);
 
   if (action === "claim" || action === "confirm") {
     if (authUser.role === "STAFF" && existing.status !== "CONFIRMED") {
@@ -135,5 +146,6 @@ export async function PUT(req: NextRequest) {
     await notifyBookingStatusChanged(tx, updated, authUser.name);
     return updated;
   });
+  await deliverPendingCustomerNotifications(prisma, booking.id);
   return NextResponse.json({ booking: serializeBooking(booking) });
 }

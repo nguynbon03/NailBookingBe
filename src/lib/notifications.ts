@@ -1,25 +1,27 @@
 import { PrismaClient } from "@prisma/client";
+import { queueCustomerBookingNotification } from "@/lib/customer-notifications";
 
 type PrismaTx = Omit<
   PrismaClient,
   "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
 >;
 
-export async function notifyBookingCreated(tx: PrismaTx, booking: { id: string; customerName: string; date: Date; time: string; totalPrice: unknown }) {
+export async function notifyBookingCreated(tx: PrismaTx, booking: any, emailVerificationUrl?: string) {
   await tx.notification.create({
     data: {
       audience: "ADMIN",
       bookingId: booking.id,
-      type: "BOOKING_AWAITING_PAYMENT",
-      title: "Booking awaiting deposit",
-      message: `${booking.customerName} requested ${booking.date.toISOString().slice(0, 10)} at ${booking.time}. Confirm only after deposit/payment is received.`,
+      type: "BOOKING_AWAITING_EMAIL_VERIFICATION",
+      title: "Booking awaiting email verification",
+      message: `${booking.customerName} requested ${booking.date.toISOString().slice(0, 10)} at ${booking.time}. Wait until the customer clicks the email verification link before confirming or assigning staff.`,
     },
   });
+  await queueCustomerBookingNotification(tx, { ...booking, emailVerificationUrl }, "booking_created");
 }
 
 export async function notifyBookingStatusChanged(
   tx: PrismaTx,
-  booking: { id: string; customerName: string; status: string; staffId?: string | null; staff?: { name?: string | null } | null },
+  booking: any,
   actorName: string
 ) {
   const staffName = booking.staff?.name || actorName;
@@ -47,4 +49,12 @@ export async function notifyBookingStatusChanged(
   }
 
   await tx.notification.createMany({ data });
+
+  if (booking.status === "CONFIRMED") {
+    await queueCustomerBookingNotification(tx, booking, "booking_confirmed");
+  } else if (booking.status === "CANCELLED") {
+    await queueCustomerBookingNotification(tx, booking, "booking_cancelled");
+  } else if (booking.status === "NO_SHOW") {
+    await queueCustomerBookingNotification(tx, booking, "booking_no_show");
+  }
 }

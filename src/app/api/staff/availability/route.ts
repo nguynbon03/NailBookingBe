@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthUser, isAdminRole } from "@/lib/auth";
+import { getAuthUser, isAdminRole, isStaffPortalRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,7 +11,7 @@ function dateOnly(value: string | Date) {
 }
 
 async function resolveStaffId(user: { email: string; role: string }, requested?: string | null) {
-  if (isAdminRole(user.role) && user.role !== "STAFF" && requested) return requested;
+  if (isAdminRole(user.role) && requested) return requested;
   const staff = await prisma.staff.findFirst({ where: { email: user.email } });
   return staff?.id || null;
 }
@@ -30,7 +30,7 @@ function payload(data: any, staffId: string) {
 
 export async function GET(req: NextRequest) {
   const authUser = await getAuthUser(req);
-  if (!authUser || !isAdminRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!authUser || !isStaffPortalRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const requested = req.nextUrl.searchParams.get("staffId");
   const staffId = await resolveStaffId(authUser, requested);
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const authUser = await getAuthUser(req);
-  if (!authUser || !isAdminRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!authUser || !isStaffPortalRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json().catch(() => ({}));
   const staffId = await resolveStaffId(authUser, body.staffId ? String(body.staffId) : null);
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   const authUser = await getAuthUser(req);
-  if (!authUser || !isAdminRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!authUser || !isStaffPortalRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json().catch(() => ({}));
   if (!body.id) return NextResponse.json({ error: "Availability id is required" }, { status: 400 });
@@ -68,7 +68,7 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   const authUser = await getAuthUser(req);
-  if (!authUser || !isAdminRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!authUser || !isStaffPortalRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await req.json().catch(() => ({}));
   if (!id) return NextResponse.json({ error: "Availability id is required" }, { status: 400 });

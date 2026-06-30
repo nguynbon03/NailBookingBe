@@ -16,7 +16,7 @@ export async function getAuthUser(req: NextRequest) {
 
     return prisma.user.findUnique({
       where: { id },
-      select: { id: true, email: true, name: true, role: true, phone: true, avatar: true },
+      select: { id: true, email: true, name: true, role: true, phone: true, avatar: true, emailVerifiedAt: true },
     });
   } catch {
     return null;
@@ -24,5 +24,9 @@ export async function getAuthUser(req: NextRequest) {
 }
 
 export function isAdminRole(role?: string | null) {
+  return role === "ADMIN" || role === "MANAGER";
+}
+
+export function isStaffPortalRole(role?: string | null) {
   return role === "ADMIN" || role === "MANAGER" || role === "STAFF";
 }

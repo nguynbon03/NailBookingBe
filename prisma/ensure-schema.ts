@@ -33,6 +33,54 @@ async function main() {
   `);
 
   await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "CustomerNotification" (
+      "id" TEXT PRIMARY KEY,
+      "bookingId" TEXT,
+      "channel" TEXT NOT NULL,
+      "recipient" TEXT NOT NULL,
+      "event" TEXT NOT NULL,
+      "subject" TEXT,
+      "message" TEXT NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'PENDING',
+      "provider" TEXT,
+      "providerMessageId" TEXT,
+      "error" TEXT,
+      "attempts" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "sentAt" TIMESTAMP(3)
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "cancellationReason" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "emailVerifiedAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "emailVerificationTokenHash" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "emailVerificationExpiresAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "emailVerificationSentAt" TIMESTAMP(3);
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "emailVerifiedAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "emailVerificationTokenHash" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "emailVerificationExpiresAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "emailVerificationSentAt" TIMESTAMP(3);
+  `);
+
+  await prisma.$executeRawUnsafe(`
     CREATE INDEX IF NOT EXISTS "StaffAvailability_staffId_idx" ON "StaffAvailability" ("staffId");
   `);
   await prisma.$executeRawUnsafe(`
@@ -40,6 +88,15 @@ async function main() {
   `);
   await prisma.$executeRawUnsafe(`
     CREATE INDEX IF NOT EXISTS "Notification_audience_read_idx" ON "Notification" ("audience", "read");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CustomerNotification_booking_status_idx" ON "CustomerNotification" ("bookingId", "status");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "Booking_email_verification_idx" ON "Booking" ("emailVerificationTokenHash");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "User_email_verification_idx" ON "User" ("emailVerificationTokenHash");
   `);
 
   await prisma.$executeRawUnsafe(`

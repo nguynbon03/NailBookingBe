@@ -60,20 +60,20 @@ async function staffHasBookingAt(tx: PrismaTx, staffId: string, date: Date, time
     where: {
       staffId,
       date: dateOnly(date),
-      status: { notIn: ["CANCELLED", "NO_SHOW"] },
+      status: "CONFIRMED",
     },
     include: { services: { include: { service: true } } },
   });
   return bookings.some((booking: any) => overlaps(requestedStart, duration, timeToMinutes(booking.time), bookingDuration(booking)));
 }
 
-async function unassignedPendingAt(tx: PrismaTx, date: Date, time: string, duration = 30) {
+async function unassignedBlockingAt(tx: PrismaTx, date: Date, time: string, duration = 30) {
   const requestedStart = timeToMinutes(time);
   const bookings = await tx.booking.findMany({
     where: {
       staffId: null,
       date: dateOnly(date),
-      status: "PENDING",
+      status: "CONFIRMED",
     },
     include: { services: { include: { service: true } } },
   });
@@ -111,7 +111,7 @@ export async function availableStaffIdsAt(tx: PrismaTx, dateInput: string | Date
 export async function hasAnyAvailableStaff(tx: PrismaTx, dateInput: string | Date, time: string, duration = 30) {
   const date = dateOnly(dateInput);
   const free = await availableStaffIdsAt(tx, date, time, duration);
-  const pending = await unassignedPendingAt(tx, date, time, duration);
+  const pending = await unassignedBlockingAt(tx, date, time, duration);
   return free.length > pending;
 }
 
@@ -142,7 +142,7 @@ export async function buildAvailabilitySlots(tx: PrismaTx, dateInput: string | D
   for (const [time, ids] of Array.from(slotMap.entries())) {
     let availableStaffCount = ids.size;
     if (!staffId) {
-      availableStaffCount = Math.max(0, availableStaffCount - (await unassignedPendingAt(tx, date, time, duration)));
+      availableStaffCount = Math.max(0, availableStaffCount - (await unassignedBlockingAt(tx, date, time, duration)));
     }
     if (availableStaffCount > 0) {
       slots.push({ time, availableStaffCount, staffIds: Array.from(ids) });

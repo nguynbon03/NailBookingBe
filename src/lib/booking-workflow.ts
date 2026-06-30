@@ -86,9 +86,16 @@ export async function updateBookingStatusWithRevenue(
   status: string,
   extraData: Record<string, unknown> = {}
 ) {
+  const data: Record<string, unknown> = { ...extraData, status: status as BookingStatus };
+  if (status === "CANCELLED") {
+    data.cancellationReason = String(data.cancellationReason || "No Reason");
+  } else {
+    data.cancellationReason = null;
+  }
+
   const booking = await tx.booking.update({
     where: { id },
-    data: { ...extraData, status: status as BookingStatus },
+    data,
     include: bookingInclude,
   });
 

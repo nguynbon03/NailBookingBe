@@ -5,6 +5,8 @@ import { getAuthUser, isAdminRole } from "@/lib/auth";
 import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from "@/lib/booking-workflow";
 import { hasAnyAvailableStaff, isStaffAvailableAndFree } from "@/lib/availability";
 import { notifyBookingCreated, notifyBookingStatusChanged } from "@/lib/notifications";
+import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
+import { bookingVerificationUrl, createVerificationToken, isValidEmail, normalizeEmail } from "@/lib/email-verification";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -27,25 +29,31 @@ async function getActivePromo(code: unknown) {
   return promoCode;
 }
 
-function isGmailAddress(email: string) {
-  return /^[A-Z0-9._%+-]+@gmail\.com$/i.test(email.trim());
-}
-
 function bookingReference(id: string) {
   return `NL-${id.slice(-8).toUpperCase()}`;
 }
 
-function buildPaymentInfo(booking: { id: string; totalPrice: unknown }) {
-  const configured = Number(process.env.BOOKING_DEPOSIT_AMOUNT || "10");
-  const total = Number(booking.totalPrice || 0);
-  const depositAmount = Math.max(1, Math.min(Number.isFinite(configured) ? configured : 10, total || configured || 10));
+function buildVerificationInfo(booking: { id: string; emailVerificationExpiresAt?: Date | null }) {
   return {
-    status: "AWAITING_PAYMENT",
-    currency: "GBP",
-    depositAmount,
+    status: "AWAITING_EMAIL_VERIFICATION",
     reference: bookingReference(booking.id),
-    instructions: "Please pay the deposit with this reference. Admin will confirm the booking after payment is received.",
+    expiresAt: booking.emailVerificationExpiresAt || null,
+    instructions: "Please open the verification email and click the secure link. Staff will not see this booking until your email is verified and the shop/admin confirms it.",
   };
+}
+
+const CANCELLATION_REASONS = new Set([
+  "Shop have Problem",
+  "Staff have problem",
+  "Shop is too busy",
+  "No Reason",
+]);
+
+function normalizeCancellationReason(value: unknown) {
+  const reason = String(value || "").trim().replace(/\s+/g, " ").slice(0, 240);
+  if (!reason || reason === "Other") return "No Reason";
+  if (CANCELLATION_REASONS.has(reason)) return reason;
+  return reason;
 }
 
 export async function POST(req: NextRequest) {
@@ -58,14 +66,25 @@ export async function POST(req: NextRequest) {
 
     const name = String(customerName || authUser?.name || "").trim();
     const phone = String(customerPhone || authUser?.phone || "").trim();
-    const email = String(customerEmail || authUser?.email || "").trim();
+    const email = normalizeEmail(customerEmail || authUser?.email || "");
 
     if (!name || !phone || !email || !date || !time) {
       return NextResponse.json({ error: "Missing required booking fields" }, { status: 400 });
     }
 
-    if (!isGmailAddress(email)) {
-      return NextResponse.json({ error: "Please use a real Gmail address to book online" }, { status: 400 });
+    if (!isValidEmail(email)) {
+      return NextResponse.json({ error: "Please enter a valid email address" }, { status: 400 });
+    }
+
+    const existingUser = await prisma.user.findUnique({ where: { email }, select: { id: true, email: true, emailVerifiedAt: true } });
+    if (!existingUser) {
+      return NextResponse.json({ error: "Please register this email before booking online. We only send verification links to registered emails to prevent fake bookings." }, { status: 400 });
+    }
+    if (!existingUser.emailVerifiedAt) {
+      return NextResponse.json({ error: "Please verify your account email before booking online. Check your inbox for the account verification link." }, { status: 403 });
+    }
+    if (authUser && normalizeEmail(authUser.email) !== email) {
+      return NextResponse.json({ error: "Booking email must match the logged-in account email" }, { status: 403 });
     }
 
     const serviceKeys = normalizeServiceInputs(serviceIds);
@@ -84,7 +103,7 @@ export async function POST(req: NextRequest) {
         date: requestedDate,
         time,
         ...(staffId ? { staffId: String(staffId) } : {}),
-        status: { notIn: ["CANCELLED", "NO_SHOW"] },
+        status: "CONFIRMED",
       },
     });
     if (existingBooking) {
@@ -123,36 +142,37 @@ export async function POST(req: NextRequest) {
     }
     if (totalPrice < 0) totalPrice = 0;
 
-    let userId = authUser?.id || null;
-    if (!userId && email) {
-      const existingUser = await prisma.user.findUnique({ where: { email }, select: { id: true } }).catch(() => null);
-      userId = existingUser?.id || null;
-    }
+    const verification = createVerificationToken();
+    const verificationUrl = bookingVerificationUrl(verification.token);
 
     const booking = await prisma.$transaction(async (tx) => {
       const created = await tx.booking.create({
         data: {
-          userId,
+          userId: existingUser.id,
           customerName: name,
           customerPhone: phone,
           customerEmail: email || null,
           date: requestedDate,
           time,
-          staffId: staffId ? String(staffId) : null,
+          staffId: null,
           status: "PENDING",
           totalPrice,
           discount: discountAmount > 0 ? discountAmount : null,
           promoCode: appliedPromoCode,
+          emailVerificationTokenHash: verification.tokenHash,
+          emailVerificationExpiresAt: verification.expiresAt,
+          emailVerificationSentAt: new Date(),
           notes: notes ? String(notes) : null,
           services: { create: services.map((service) => ({ serviceId: service.id })) },
         },
         include: bookingInclude,
       });
-      await notifyBookingCreated(tx, created);
+      await notifyBookingCreated(tx, created, verificationUrl);
       return created;
     });
 
-    return NextResponse.json({ booking: serializeBooking(booking), payment: buildPaymentInfo(booking) });
+    await deliverPendingCustomerNotifications(prisma, booking.id);
+    return NextResponse.json({ booking: serializeBooking(booking), verification: buildVerificationInfo(booking) });
   } catch (e) {
     return NextResponse.json({ error: "Booking failed" }, { status: 500 });
   }
@@ -185,19 +205,27 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { id, status, staffId } = await req.json().catch(() => ({}));
+  const { id, status, staffId, cancellationReason } = await req.json().catch(() => ({}));
   const allowed = new Set(["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"]);
   if (!id || !allowed.has(status)) {
     return NextResponse.json({ error: "Invalid booking status" }, { status: 400 });
   }
 
+  const target = await prisma.booking.findUnique({ where: { id: String(id) }, select: { id: true, status: true, emailVerifiedAt: true } });
+  if (!target) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
+  if (status === "CONFIRMED" && !target.emailVerifiedAt) {
+    return NextResponse.json({ error: "Customer email is not verified yet. Ask the customer to click the verification email before confirming." }, { status: 409 });
+  }
+
   const booking = await prisma.$transaction(async (tx) => {
     const extraData: Record<string, unknown> = {};
     if (staffId !== undefined) extraData.staffId = staffId || null;
+    if (status === "CANCELLED") extraData.cancellationReason = normalizeCancellationReason(cancellationReason);
     const updated = await updateBookingStatusWithRevenue(tx, String(id), status as BookingStatus, extraData);
     await notifyBookingStatusChanged(tx, updated, authUser.name);
     return updated;
   });
 
+  await deliverPendingCustomerNotifications(prisma, booking.id);
   return NextResponse.json({ booking: serializeBooking(booking) });
 }
