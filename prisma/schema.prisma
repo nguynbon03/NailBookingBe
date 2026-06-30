@@ -257,6 +257,7 @@ model BookingProtectionSetting {
   requireDepositForNewCustomer Boolean  @default(true)
   requireDepositForWeekend     Boolean  @default(true)
   requireDepositForHighValue   Boolean  @default(true)
+  customerExportEnabled        Boolean  @default(true)
   createdAt                    DateTime @default(now())
   updatedAt                    DateTime @updatedAt
 }

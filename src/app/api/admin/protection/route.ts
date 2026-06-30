@@ -55,6 +55,7 @@ export async function PUT(req: NextRequest) {
       requireDepositForNewCustomer: Boolean(body.requireDepositForNewCustomer),
       requireDepositForWeekend: Boolean(body.requireDepositForWeekend),
       requireDepositForHighValue: Boolean(body.requireDepositForHighValue),
+      customerExportEnabled: body.customerExportEnabled === undefined ? true : Boolean(body.customerExportEnabled),
     },
     update: {
       depositMode,
@@ -67,6 +68,7 @@ export async function PUT(req: NextRequest) {
       requireDepositForNewCustomer: Boolean(body.requireDepositForNewCustomer),
       requireDepositForWeekend: Boolean(body.requireDepositForWeekend),
       requireDepositForHighValue: Boolean(body.requireDepositForHighValue),
+      ...(body.customerExportEnabled === undefined ? {} : { customerExportEnabled: Boolean(body.customerExportEnabled) }),
     },
   });
 

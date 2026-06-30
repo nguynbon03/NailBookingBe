@@ -81,6 +81,7 @@ export async function getProtectionSettings(prisma: PrismaDb) {
       requireDepositForNewCustomer: true,
       requireDepositForWeekend: true,
       requireDepositForHighValue: true,
+      customerExportEnabled: true,
     },
     update: {},
   });

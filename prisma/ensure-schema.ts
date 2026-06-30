@@ -211,6 +211,7 @@ async function main() {
       "requireDepositForNewCustomer" BOOLEAN NOT NULL DEFAULT true,
       "requireDepositForWeekend" BOOLEAN NOT NULL DEFAULT true,
       "requireDepositForHighValue" BOOLEAN NOT NULL DEFAULT true,
+      "customerExportEnabled" BOOLEAN NOT NULL DEFAULT true,
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -221,6 +222,9 @@ async function main() {
 
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "BookingProtectionSetting" ADD COLUMN IF NOT EXISTS "maxBookingsPerIpPerDay" INTEGER NOT NULL DEFAULT 8;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "BookingProtectionSetting" ADD COLUMN IF NOT EXISTS "customerExportEnabled" BOOLEAN NOT NULL DEFAULT true;
   `);
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "CustomerBlocklist" (
