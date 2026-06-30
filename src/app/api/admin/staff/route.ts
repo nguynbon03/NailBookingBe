@@ -8,29 +8,32 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const DEFAULT_STAFF_PASSWORD = "staff123";
-const privilegedLoginRoles = new Set<Role>(["ADMIN", "MANAGER"]);
+const serviceStaffRoles = new Set(["THERAPIST", "MANICURIST", "WAXING_SPECIALIST"]);
+
+function normalizeStaffRole(value: unknown) {
+  const role = String(value || "THERAPIST").trim().toUpperCase();
+  return serviceStaffRoles.has(role) ? role : "THERAPIST";
+}
 
 function staffPayload(data: any) {
   return {
     name: String(data.name || "").trim(),
     email: String(data.email || "").trim().toLowerCase(),
     phone: data.phone ? String(data.phone) : null,
-    role: String(data.role || "THERAPIST").trim().toUpperCase(),
+    role: normalizeStaffRole(data.role),
     bio: data.bio ? String(data.bio) : null,
     avatar: data.avatar ? String(data.avatar) : null,
     active: data.active === undefined ? true : Boolean(data.active),
   };
 }
 
-function loginRoleFromStaffRole(staffRole: string): Role {
-  if (staffRole === "ADMIN") return "ADMIN";
-  if (staffRole === "MANAGER") return "MANAGER";
+function loginRoleFromStaffRole(_staffRole: string): Role {
   return "STAFF";
 }
 
 function canManageLoginRole(actorRole: string, targetRole: Role, currentRole?: Role | null) {
   if (actorRole === "ADMIN") return true;
-  return targetRole === "STAFF" && (!currentRole || !privilegedLoginRoles.has(currentRole));
+  return targetRole === "STAFF" && !["ADMIN", "MANAGER"].includes(currentRole || "");
 }
 
 function forbiddenRoleResponse() {

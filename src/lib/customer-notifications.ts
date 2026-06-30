@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import * as nodemailer from "nodemailer";
 
 type PrismaTx = Omit<
   PrismaClient,
@@ -18,7 +19,7 @@ type CustomerBooking = {
   services?: { service?: { name?: string | null } | null }[];
 };
 
-type CustomerEvent = "booking_created" | "booking_confirmed" | "booking_cancelled" | "booking_no_show" | "booking_email_verification" | "account_verification";
+type CustomerEvent = "booking_created" | "booking_confirmed" | "booking_cancelled" | "booking_no_show" | "booking_email_verification" | "account_verification" | "payment_transfer_link";
 
 const SHOP_NAME = process.env.SHOP_NAME || "The Nail Lounge @ Stokesley";
 const PUBLIC_BOOKING_URL = process.env.PUBLIC_BOOKING_URL || "https://bookingnail.overpowers.agency/my-bookings";
@@ -40,11 +41,11 @@ function composeCustomerMessage(booking: CustomerBooking, event: CustomerEvent) 
   const service = serviceSummary(booking);
   const when = `${formatDate(booking.date)} at ${booking.time}`;
 
-  if (event === "booking_created" || event === "booking_email_verification") {
-    const verificationUrl = (booking as any).emailVerificationUrl || PUBLIC_BOOKING_URL;
+  if (event === "booking_created" || event === "booking_email_verification" || event === "payment_transfer_link") {
+    const transferUrl = (booking as any).paymentTransferUrl || (booking as any).emailVerificationUrl || PUBLIC_BOOKING_URL;
     return {
-      subject: `${SHOP_NAME}: confirm your booking request (${ref})`,
-      message: `Hi ${booking.customerName}, please confirm this booking request for ${service} on ${when}. Reference: ${ref}. Click this secure link within 30 minutes: ${verificationUrl}. The appointment will not be shown to staff, assigned to a staff member, or synced to any external calendar until the email is confirmed and the shop/admin approves it.`,
+      subject: `${SHOP_NAME}: secure payment link for your booking (${ref})`,
+      message: `Hi ${booking.customerName}, your account email is verified and your booking request for ${service} on ${when} has been received. Reference: ${ref}. Click this secure transfer link within 3 minutes to lock one available staff member for this slot: ${transferUrl}. Use ${ref} as the bank-transfer reference. The appointment will only appear on the staff schedule after the shop/admin confirms the bank transfer. If the 3-minute lock expires, please reopen the booking flow or contact the shop before transferring.`,
     };
   }
 
@@ -69,8 +70,16 @@ function composeCustomerMessage(booking: CustomerBooking, event: CustomerEvent) 
   };
 }
 
-function hasEmailProvider() {
+function hasSmtpProvider() {
+  return Boolean(process.env.SMTP_HOST && (process.env.SMTP_FROM || process.env.FROM_EMAIL));
+}
+
+function hasResendProvider() {
   return Boolean(process.env.RESEND_API_KEY && process.env.FROM_EMAIL);
+}
+
+function hasEmailProvider() {
+  return hasSmtpProvider() || hasResendProvider();
 }
 
 function hasSmsProvider() {
@@ -93,7 +102,7 @@ export async function queueCustomerBookingNotification(tx: PrismaTx, booking: Cu
       subject,
       message,
       status: "PENDING",
-      provider: hasEmailProvider() ? "resend" : null,
+      provider: hasSmtpProvider() ? "smtp" : hasResendProvider() ? "resend" : null,
     });
   }
   if (booking.customerPhone) {
@@ -126,7 +135,7 @@ export async function queueDirectCustomerNotification(
       subject: channel === "EMAIL" ? data.subject : null,
       message: data.message,
       status: "PENDING",
-      provider: channel === "EMAIL" ? (hasEmailProvider() ? "resend" : null) : (hasSmsProvider() ? "twilio" : null),
+      provider: channel === "EMAIL" ? (hasSmtpProvider() ? "smtp" : hasResendProvider() ? "resend" : null) : (hasSmsProvider() ? "twilio" : null),
     },
   });
 }
@@ -136,7 +145,28 @@ async function mark(prisma: PrismaClient, id: string, data: Record<string, unkno
 }
 
 async function sendEmail(row: any) {
-  if (!hasEmailProvider()) throw new Error("Email provider not configured: set RESEND_API_KEY and FROM_EMAIL");
+  if (!hasEmailProvider()) throw new Error("Email provider not configured: set SMTP_HOST and SMTP_FROM/FROM_EMAIL, or RESEND_API_KEY and FROM_EMAIL");
+
+  if (hasSmtpProvider()) {
+    const port = Number(process.env.SMTP_PORT || 587);
+    const secure = String(process.env.SMTP_SECURE || "").toLowerCase() === "true" || port === 465;
+    const user = process.env.SMTP_USER || "";
+    const pass = process.env.SMTP_PASS || "";
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port,
+      secure,
+      auth: user || pass ? { user, pass } : undefined,
+    });
+    const info = await transporter.sendMail({
+      from: process.env.SMTP_FROM || process.env.FROM_EMAIL,
+      to: row.recipient,
+      subject: row.subject || `${SHOP_NAME} booking update`,
+      text: row.message,
+    });
+    return info.messageId || null;
+  }
+
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   headers.Authorization = String.fromCharCode(66, 101, 97, 114, 101, 114) + " " + process.env.RESEND_API_KEY;
   const res = await fetch("https://api.resend.com/emails", {

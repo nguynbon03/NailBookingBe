@@ -6,17 +6,17 @@ type PrismaTx = Omit<
   "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
 >;
 
-export async function notifyBookingCreated(tx: PrismaTx, booking: any, emailVerificationUrl?: string) {
+export async function notifyBookingCreated(tx: PrismaTx, booking: any, paymentTransferUrl?: string) {
   await tx.notification.create({
     data: {
       audience: "ADMIN",
       bookingId: booking.id,
-      type: "BOOKING_AWAITING_EMAIL_VERIFICATION",
-      title: "Booking awaiting email verification",
-      message: `${booking.customerName} requested ${booking.date.toISOString().slice(0, 10)} at ${booking.time}. Wait until the customer clicks the email verification link before confirming or assigning staff.`,
+      type: "BOOKING_AWAITING_TRANSFER",
+      title: "Booking awaiting transfer lock",
+      message: `${booking.customerName} requested ${booking.date.toISOString().slice(0, 10)} at ${booking.time}. Customer must open the secure transfer link within 3 minutes to lock a staff slot; only confirm after bank transfer is received.`,
     },
   });
-  await queueCustomerBookingNotification(tx, { ...booking, emailVerificationUrl }, "booking_created");
+  await queueCustomerBookingNotification(tx, { ...booking, paymentTransferUrl }, "payment_transfer_link");
 }
 
 export async function notifyBookingStatusChanged(

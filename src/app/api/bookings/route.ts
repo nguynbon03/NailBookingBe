@@ -3,10 +3,11 @@ import { BookingStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser, isAdminRole } from "@/lib/auth";
 import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from "@/lib/booking-workflow";
-import { hasAnyAvailableStaff, isStaffAvailableAndFree } from "@/lib/availability";
+import { hasAnyAvailableStaff, isStaffAvailableAndFree, availableStaffIdsAt } from "@/lib/availability";
 import { notifyBookingCreated, notifyBookingStatusChanged } from "@/lib/notifications";
 import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
-import { bookingVerificationUrl, createVerificationToken, isValidEmail, normalizeEmail } from "@/lib/email-verification";
+import { createVerificationToken, hashVerificationToken, isValidEmail, normalizeEmail } from "@/lib/email-verification";
+import { bookingReference, paymentTransferUrl } from "@/lib/payment-locks";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,19 +30,6 @@ async function getActivePromo(code: unknown) {
   return promoCode;
 }
 
-function bookingReference(id: string) {
-  return `NL-${id.slice(-8).toUpperCase()}`;
-}
-
-function buildVerificationInfo(booking: { id: string; emailVerificationExpiresAt?: Date | null }) {
-  return {
-    status: "AWAITING_EMAIL_VERIFICATION",
-    reference: bookingReference(booking.id),
-    expiresAt: booking.emailVerificationExpiresAt || null,
-    instructions: "Please open the verification email and click the secure link. Staff will not see this booking until your email is verified and the shop/admin confirms it.",
-  };
-}
-
 const CANCELLATION_REASONS = new Set([
   "Shop have Problem",
   "Staff have problem",
@@ -59,14 +47,22 @@ function normalizeCancellationReason(value: unknown) {
 export async function POST(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
+    if (!authUser) {
+      return NextResponse.json({ error: "Please sign in before booking online" }, { status: 401 });
+    }
+    if (!authUser.emailVerifiedAt) {
+      return NextResponse.json({ error: "Please verify your account email before booking online" }, { status: 403 });
+    }
+
     const body = await req.json();
     const { customerName, customerPhone, customerEmail, serviceIds, staffId, promoCode, notes } = body;
     const date = body.date;
     const time = body.time;
 
-    const name = String(customerName || authUser?.name || "").trim();
-    const phone = String(customerPhone || authUser?.phone || "").trim();
-    const email = normalizeEmail(customerEmail || authUser?.email || "");
+    const name = String(customerName || authUser.name || "").trim();
+    const phone = String(customerPhone || authUser.phone || "").trim();
+    const email = normalizeEmail(customerEmail || authUser.email || "");
+    const accountEmail = normalizeEmail(authUser.email);
 
     if (!name || !phone || !email || !date || !time) {
       return NextResponse.json({ error: "Missing required booking fields" }, { status: 400 });
@@ -75,16 +71,8 @@ export async function POST(req: NextRequest) {
     if (!isValidEmail(email)) {
       return NextResponse.json({ error: "Please enter a valid email address" }, { status: 400 });
     }
-
-    const existingUser = await prisma.user.findUnique({ where: { email }, select: { id: true, email: true, emailVerifiedAt: true } });
-    if (!existingUser) {
-      return NextResponse.json({ error: "Please register this email before booking online. We only send verification links to registered emails to prevent fake bookings." }, { status: 400 });
-    }
-    if (!existingUser.emailVerifiedAt) {
-      return NextResponse.json({ error: "Please verify your account email before booking online. Check your inbox for the account verification link." }, { status: 403 });
-    }
-    if (authUser && normalizeEmail(authUser.email) !== email) {
-      return NextResponse.json({ error: "Booking email must match the logged-in account email" }, { status: 403 });
+    if (email !== accountEmail) {
+      return NextResponse.json({ error: "Booking email must match the signed-in account email" }, { status: 403 });
     }
 
     const serviceKeys = normalizeServiceInputs(serviceIds);
@@ -93,8 +81,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (staffId) {
-      const staff = await prisma.staff.findFirst({ where: { id: String(staffId), active: true } });
-      if (!staff) return NextResponse.json({ error: "Selected staff was not found" }, { status: 400 });
+      const staff = await prisma.staff.findFirst({ where: { id: String(staffId), active: true, role: { notIn: ["ADMIN", "MANAGER"] } } });
+      if (!staff) return NextResponse.json({ error: "Selected staff was not found or is not bookable" }, { status: 400 });
     }
 
     const requestedDate = new Date(date);
@@ -142,37 +130,52 @@ export async function POST(req: NextRequest) {
     }
     if (totalPrice < 0) totalPrice = 0;
 
-    const verification = createVerificationToken();
-    const verificationUrl = bookingVerificationUrl(verification.token);
+    const transfer = createVerificationToken(3);
+    const transferUrl = paymentTransferUrl(transfer.token);
 
     const booking = await prisma.$transaction(async (tx) => {
       const created = await tx.booking.create({
         data: {
-          userId: existingUser.id,
+          userId: authUser.id,
           customerName: name,
           customerPhone: phone,
-          customerEmail: email || null,
+          customerEmail: email,
           date: requestedDate,
           time,
           staffId: null,
+          requestedStaffId: staffId ? String(staffId) : null,
           status: "PENDING",
           totalPrice,
           discount: discountAmount > 0 ? discountAmount : null,
           promoCode: appliedPromoCode,
-          emailVerificationTokenHash: verification.tokenHash,
-          emailVerificationExpiresAt: verification.expiresAt,
-          emailVerificationSentAt: new Date(),
+          emailVerifiedAt: new Date(),
+          paymentTransferTokenHash: transfer.tokenHash,
+          paymentTransferExpiresAt: transfer.expiresAt,
+          paymentReference: null,
           notes: notes ? String(notes) : null,
           services: { create: services.map((service) => ({ serviceId: service.id })) },
         },
         include: bookingInclude,
       });
-      await notifyBookingCreated(tx, created, verificationUrl);
-      return created;
+      const withRef = await tx.booking.update({
+        where: { id: created.id },
+        data: { paymentReference: bookingReference(created.id) },
+        include: bookingInclude,
+      });
+      await notifyBookingCreated(tx, withRef, transferUrl);
+      return withRef;
     });
 
     await deliverPendingCustomerNotifications(prisma, booking.id);
-    return NextResponse.json({ booking: serializeBooking(booking), verification: buildVerificationInfo(booking) });
+    return NextResponse.json({
+      booking: serializeBooking(booking),
+      verification: {
+        status: "AWAITING_TRANSFER_LOCK",
+        reference: booking.paymentReference || bookingReference(booking.id),
+        expiresAt: booking.paymentTransferExpiresAt,
+        instructions: "Open the secure transfer link sent by email within 3 minutes. Opening the link locks one available staff member for this time slot while you transfer.",
+      },
+    });
   } catch (e) {
     return NextResponse.json({ error: "Booking failed" }, { status: 500 });
   }
@@ -221,18 +224,40 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Invalid booking status" }, { status: 400 });
   }
 
-  const target = await prisma.booking.findUnique({ where: { id: String(id) }, select: { id: true, status: true, emailVerifiedAt: true, paymentConfirmedAt: true } });
+  const target = await prisma.booking.findUnique({
+    where: { id: String(id) },
+    include: { services: { include: { service: true } }, staff: true },
+  });
   if (!target) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
   if (status === "CONFIRMED" && !target.emailVerifiedAt) {
-    return NextResponse.json({ error: "Customer email is not verified yet. Ask the customer to click the verification email before confirming payment." }, { status: 409 });
+    return NextResponse.json({ error: "Customer account email is not verified yet." }, { status: 409 });
+  }
+
+  const totalDuration = (target.services || []).reduce((sum: number, item: any) => sum + Number(item.service?.duration || 0), 0) || 30;
+  let confirmedStaffId: string | null | undefined = staffId === undefined ? undefined : (staffId || null);
+  if (status === "CONFIRMED") {
+    confirmedStaffId = confirmedStaffId || target.staffId || target.paymentHoldStaffId || null;
+    if (confirmedStaffId) {
+      const ok = await isStaffAvailableAndFree(prisma, confirmedStaffId, target.date, target.time, totalDuration, target.id);
+      if (!ok) {
+        return NextResponse.json({ error: "The locked staff is no longer available for this slot. Reassign before confirming payment." }, { status: 409 });
+      }
+    } else {
+      const free = await availableStaffIdsAt(prisma, target.date, target.time, totalDuration);
+      if (!free.length) return NextResponse.json({ error: "No staff is available for this paid slot" }, { status: 409 });
+      confirmedStaffId = free[0];
+    }
   }
 
   const booking = await prisma.$transaction(async (tx) => {
     const extraData: Record<string, unknown> = {};
     if (staffId !== undefined) extraData.staffId = staffId || null;
     if (status === "CONFIRMED") {
+      extraData.staffId = confirmedStaffId || null;
+      extraData.paymentHoldStaffId = confirmedStaffId || target.paymentHoldStaffId || null;
       extraData.paymentConfirmedAt = target.paymentConfirmedAt || new Date();
       extraData.paymentConfirmedBy = authUser.name || authUser.email;
+      extraData.paymentReference = target.paymentReference || bookingReference(target.id);
     }
     if (status === "PENDING") {
       extraData.paymentConfirmedAt = null;

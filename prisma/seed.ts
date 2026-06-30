@@ -55,6 +55,13 @@ async function main() {
   });
   console.log(`Admin user: ${admin.email}`);
 
+  const manager = await prisma.user.upsert({
+    where: { email: "manager@nailbooking.com" },
+    update: { name: "Manager", role: "MANAGER", phone: "+447****0000", emailVerifiedAt: new Date() },
+    create: { email: "manager@nailbooking.com", password: hashSync("manager123", 10), name: "Manager", phone: "+447****0000", role: "MANAGER", emailVerifiedAt: new Date() },
+  });
+  console.log(`Manager user: ${manager.email}`);
+
   // 2. Seed services (skip if already exist to avoid duplicates)
   for (const s of servicesWithImages) {
     const existing = await prisma.service.findFirst({ where: { name: s.name } });
@@ -76,7 +83,7 @@ async function main() {
     const existing = await prisma.staff.findFirst({ where: { email: st.email } });
     const staffRecord = !existing
       ? await prisma.staff.create({ data: st })
-      : await prisma.staff.update({ where: { id: existing.id }, data: { avatar: existing.avatar || st.avatar, active: existing.active } });
+      : await prisma.staff.update({ where: { id: existing.id }, data: { name: st.name, phone: st.phone, role: st.role, bio: st.bio, avatar: existing.avatar || st.avatar, active: true } });
     await prisma.user.upsert({
       where: { email: st.email },
       update: { name: st.name, phone: st.phone, role: "STAFF" },

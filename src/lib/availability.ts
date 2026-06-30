@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { isStaffSlotLocked } from "@/lib/payment-locks";
 
 type PrismaTx = Omit<
   PrismaClient,
@@ -96,9 +97,9 @@ async function unassignedBlockingAt(tx: PrismaTx, date: Date, time: string, dura
   return bookings.filter((booking: any) => overlaps(requestedStart, duration, timeToMinutes(booking.time), bookingDuration(booking))).length;
 }
 
-export async function isStaffAvailableAndFree(tx: PrismaTx, staffId: string, dateInput: string | Date, time: string, duration = 30) {
+export async function isStaffAvailableAndFree(tx: PrismaTx, staffId: string, dateInput: string | Date, time: string, duration = 30, ignoreBookingId?: string) {
   const date = dateOnly(dateInput);
-  const staff = await tx.staff.findFirst({ where: { id: staffId, active: true }, select: { id: true } });
+  const staff = await tx.staff.findFirst({ where: { id: staffId, active: true, role: { notIn: ["ADMIN", "MANAGER"] } }, select: { id: true } });
   if (!staff) return false;
   if (await staffHasApprovedLeave(tx, staffId, date)) return false;
 
@@ -109,13 +110,15 @@ export async function isStaffAvailableAndFree(tx: PrismaTx, staffId: string, dat
   if (!inWindow) return false;
 
   const busy = await staffHasBookingAt(tx, staffId, date, time, duration);
-  return !busy;
+  if (busy) return false;
+  if (await isStaffSlotLocked(tx, staffId, date, time, ignoreBookingId)) return false;
+  return true;
 }
 
 export async function availableStaffIdsAt(tx: PrismaTx, dateInput: string | Date, time: string, duration = 30, staffId?: string | null) {
   const date = dateOnly(dateInput);
   const staff = await tx.staff.findMany({
-    where: { active: true, ...(staffId ? { id: staffId } : {}) },
+    where: { active: true, role: { notIn: ["ADMIN", "MANAGER"] }, ...(staffId ? { id: staffId } : {}) },
     select: { id: true },
   });
   const free: string[] = [];
@@ -135,7 +138,7 @@ export async function hasAnyAvailableStaff(tx: PrismaTx, dateInput: string | Dat
 export async function buildAvailabilitySlots(tx: PrismaTx, dateInput: string | Date, duration = 30, staffId?: string | null) {
   const date = dateOnly(dateInput);
   const staff = await tx.staff.findMany({
-    where: { active: true, ...(staffId ? { id: staffId } : {}) },
+    where: { active: true, role: { notIn: ["ADMIN", "MANAGER"] }, ...(staffId ? { id: staffId } : {}) },
     select: { id: true, name: true },
   });
   const slotMap = new Map<string, Set<string>>();

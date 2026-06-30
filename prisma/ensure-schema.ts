@@ -99,6 +99,30 @@ async function main() {
     ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "staffRejectionBy" TEXT;
   `);
   await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "requestedStaffId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "paymentTransferTokenHash" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "paymentTransferExpiresAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "paymentTransferOpenedAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "paymentHoldStaffId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "paymentHoldStartedAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "paymentHoldExpiresAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "paymentReference" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
     ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "archivedAt" TIMESTAMP(3);
   `);
 
@@ -138,6 +162,12 @@ async function main() {
   `);
   await prisma.$executeRawUnsafe(`
     CREATE INDEX IF NOT EXISTS "User_email_verification_idx" ON "User" ("emailVerificationTokenHash");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "Booking_payment_transfer_idx" ON "Booking" ("paymentTransferTokenHash");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "Booking_payment_hold_idx" ON "Booking" ("date", "time", "paymentHoldStaffId", "paymentHoldExpiresAt");
   `);
 
   await prisma.$executeRawUnsafe(`

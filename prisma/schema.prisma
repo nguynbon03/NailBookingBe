@@ -140,6 +140,14 @@ model Booking {
   staffRejectedAt                DateTime?
   staffRejectionReason           String?
   staffRejectionBy               String?
+  requestedStaffId               String?
+  paymentTransferTokenHash       String?
+  paymentTransferExpiresAt       DateTime?
+  paymentTransferOpenedAt        DateTime?
+  paymentHoldStaffId             String?
+  paymentHoldStartedAt           DateTime?
+  paymentHoldExpiresAt           DateTime?
+  paymentReference               String?
   archivedAt                     DateTime?
   notes                          String?
   createdAt                      DateTime      @default(now())
