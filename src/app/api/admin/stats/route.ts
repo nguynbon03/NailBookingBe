@@ -33,8 +33,12 @@ function addMonths(date: Date, months: number) {
   return next;
 }
 
-function buildSeries(keys: string[], totals: Map<string, number>) {
-  return keys.map((key) => ({ label: key, revenue: money(totals.get(key) || 0) }));
+function buildSeries(keys: string[], revenueTotals: Map<string, number>, countTotals: Map<string, number>) {
+  return keys.map((key) => ({
+    label: key,
+    revenue: money(revenueTotals.get(key) || 0),
+    count: countTotals.get(key) || 0,
+  }));
 }
 
 export async function GET() {
@@ -42,13 +46,18 @@ export async function GET() {
   const start = new Date(Date.UTC(now.getUTCFullYear() - 3, 0, 1));
   const revenueStatuses: BookingStatus[] = ["CONFIRMED", "COMPLETED"];
 
-  const [totalUsers, customers, adminUsers, bookings, confirmedBookings, services, activeServices, activePromoCodes, promoCodes] = await Promise.all([
+  const [totalUsers, customers, adminUsers, bookings, allBookingsForSeries, confirmedBookings, services, activeServices, activePromoCodes, promoCodes] = await Promise.all([
     prisma.user.count(),
     prisma.user.count({ where: { role: "CUSTOMER" } }),
     prisma.user.count({ where: { role: { in: ["ADMIN", "MANAGER", "STAFF"] } } }),
     prisma.booking.count(),
     prisma.booking.findMany({
-      where: { status: { in: revenueStatuses }, date: { gte: start } },
+      where: { date: { gte: start }, archivedAt: null },
+      select: { id: true, date: true, status: true },
+      orderBy: { date: "asc" },
+    }),
+    prisma.booking.findMany({
+      where: { status: { in: revenueStatuses }, date: { gte: start }, archivedAt: null },
       select: { id: true, date: true, totalPrice: true, discount: true, promoCode: true, status: true },
       orderBy: { date: "asc" },
     }),
@@ -61,7 +70,19 @@ export async function GET() {
   const dailyTotals = new Map<string, number>();
   const monthlyTotals = new Map<string, number>();
   const yearlyTotals = new Map<string, number>();
+  const dailyCounts = new Map<string, number>();
+  const monthlyCounts = new Map<string, number>();
+  const yearlyCounts = new Map<string, number>();
   let revenue = 0;
+
+  for (const booking of allBookingsForSeries) {
+    const day = dateKey(booking.date);
+    const month = monthKey(booking.date);
+    const year = yearKey(booking.date);
+    dailyCounts.set(day, (dailyCounts.get(day) || 0) + 1);
+    monthlyCounts.set(month, (monthlyCounts.get(month) || 0) + 1);
+    yearlyCounts.set(year, (yearlyCounts.get(year) || 0) + 1);
+  }
 
   for (const booking of confirmedBookings) {
     const amount = Number(booking.totalPrice);
@@ -91,9 +112,9 @@ export async function GET() {
       activePromoCodes,
     },
     revenueSeries: {
-      daily: buildSeries(dayKeys, dailyTotals),
-      monthly: buildSeries(monthKeys, monthlyTotals),
-      yearly: buildSeries(yearKeys, yearlyTotals),
+      daily: buildSeries(dayKeys, dailyTotals, dailyCounts),
+      monthly: buildSeries(monthKeys, monthlyTotals, monthlyCounts),
+      yearly: buildSeries(yearKeys, yearlyTotals, yearlyCounts),
     },
     promoCodes: promoCodes.map((promo) => ({
       id: promo.id,
