@@ -35,6 +35,7 @@ export function serializeBooking(booking: any) {
 export const bookingInclude = {
   services: { include: { service: true } },
   staff: true,
+  requestedStaff: true,
   user: { select: { id: true, email: true, name: true, role: true } },
 };
 

@@ -55,13 +55,17 @@ function overlaps(aStart: number, aDuration: number, bStart: number, bDuration: 
   return aStart < bStart + bDuration && bStart < aStart + aDuration;
 }
 
-async function staffHasBookingAt(tx: PrismaTx, staffId: string, date: Date, time: string, duration = 30) {
+async function staffHasBookingAt(tx: PrismaTx, staffId: string, date: Date, time: string, duration = 30, ignoreBookingId?: string) {
   const requestedStart = timeToMinutes(time);
   const bookings = await tx.booking.findMany({
     where: {
-      staffId,
       date: dateOnly(date),
-      status: "CONFIRMED",
+      archivedAt: null,
+      ...(ignoreBookingId ? { id: { not: ignoreBookingId } } : {}),
+      AND: [
+        { OR: [{ staffId }, { requestedStaffId: staffId }] },
+        { OR: [{ status: "CONFIRMED" }, { status: "PENDING", depositRequired: false }] },
+      ],
     },
     include: { services: { include: { service: true } } },
   });
@@ -89,8 +93,13 @@ async function unassignedBlockingAt(tx: PrismaTx, date: Date, time: string, dura
   const bookings = await tx.booking.findMany({
     where: {
       staffId: null,
+      requestedStaffId: null,
       date: dateOnly(date),
-      status: "CONFIRMED",
+      archivedAt: null,
+      OR: [
+        { status: "CONFIRMED" },
+        { status: "PENDING", depositRequired: false },
+      ],
     },
     include: { services: { include: { service: true } } },
   });
@@ -109,7 +118,7 @@ export async function isStaffAvailableAndFree(tx: PrismaTx, staffId: string, dat
   const inWindow = windows.some((window) => start >= timeToMinutes(window.startTime) && end <= timeToMinutes(window.endTime));
   if (!inWindow) return false;
 
-  const busy = await staffHasBookingAt(tx, staffId, date, time, duration);
+  const busy = await staffHasBookingAt(tx, staffId, date, time, duration, ignoreBookingId);
   if (busy) return false;
   if (await isStaffSlotLocked(tx, staffId, date, time, ignoreBookingId)) return false;
   return true;

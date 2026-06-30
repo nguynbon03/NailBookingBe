@@ -125,6 +125,21 @@ async function main() {
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "archivedAt" TIMESTAMP(3);
   `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "sourceIp" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "userAgent" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "depositRequired" BOOLEAN NOT NULL DEFAULT false;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "depositAmount" DECIMAL(10,2);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "depositModeSnapshot" TEXT;
+  `);
 
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "emailVerifiedAt" TIMESTAMP(3);
@@ -168,6 +183,62 @@ async function main() {
   `);
   await prisma.$executeRawUnsafe(`
     CREATE INDEX IF NOT EXISTS "Booking_payment_hold_idx" ON "Booking" ("date", "time", "paymentHoldStaffId", "paymentHoldExpiresAt");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "Booking_user_status_idx" ON "Booking" ("userId", "status");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "Booking_customer_email_created_idx" ON "Booking" ("customerEmail", "createdAt");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "Booking_customer_phone_created_idx" ON "Booking" ("customerPhone", "createdAt");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "Booking_source_ip_created_idx" ON "Booking" ("sourceIp", "createdAt");
+  `);
+
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "BookingProtectionSetting" (
+      "id" TEXT PRIMARY KEY DEFAULT 'default',
+      "depositMode" TEXT NOT NULL DEFAULT 'SMART',
+      "depositAmount" DECIMAL(10,2) NOT NULL DEFAULT 10.00,
+      "highValueThreshold" DECIMAL(10,2) NOT NULL DEFAULT 50.00,
+      "maxActiveBookingsPerCustomer" INTEGER NOT NULL DEFAULT 2,
+      "maxBookingsPerPhonePerDay" INTEGER NOT NULL DEFAULT 3,
+      "maxBookingsPerEmailPerDay" INTEGER NOT NULL DEFAULT 3,
+      "maxBookingsPerIpPerDay" INTEGER NOT NULL DEFAULT 8,
+      "requireDepositForNewCustomer" BOOLEAN NOT NULL DEFAULT true,
+      "requireDepositForWeekend" BOOLEAN NOT NULL DEFAULT true,
+      "requireDepositForHighValue" BOOLEAN NOT NULL DEFAULT true,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    INSERT INTO "BookingProtectionSetting" ("id") VALUES ('default') ON CONFLICT ("id") DO NOTHING;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "BookingProtectionSetting" ADD COLUMN IF NOT EXISTS "maxBookingsPerIpPerDay" INTEGER NOT NULL DEFAULT 8;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "CustomerBlocklist" (
+      "id" TEXT PRIMARY KEY,
+      "type" TEXT NOT NULL,
+      "value" TEXT NOT NULL,
+      "reason" TEXT,
+      "active" BOOLEAN NOT NULL DEFAULT true,
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "CustomerBlocklist_type_value_key" ON "CustomerBlocklist" ("type", "value");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CustomerBlocklist_active_lookup_idx" ON "CustomerBlocklist" ("active", "type", "value");
   `);
 
   await prisma.$executeRawUnsafe(`

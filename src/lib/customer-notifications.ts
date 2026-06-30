@@ -67,7 +67,7 @@ function renderEmailHtml(subject: string, message: string) {
   const accent = isCancelled ? "#ef4444" : isConfirmed ? "#10b981" : "#ec4899";
   const ctaLabel = isPayment ? "Open secure transfer link" : isConfirmed ? "View my booking" : "Open booking details";
   const preheader = isPayment
-    ? "Your Nail Lounge booking is saved. Open the secure link within 3 minutes to lock a staff member."
+    ? "Your Nail Lounge booking is saved. A deposit may be required before staff assignment."
     : isConfirmed
       ? "Your Nail Lounge booking has been confirmed."
       : isCancelled
@@ -94,7 +94,7 @@ function renderEmailHtml(subject: string, message: string) {
     : "";
 
   const paymentNote = isPayment
-    ? `<tr><td style="padding:0 28px 22px;"><div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:20px;padding:16px;color:#9a3412;font-size:13px;line-height:1.6;"><strong>Important:</strong> opening the link locks one available staff member for 3 minutes. Please use the reference above on your bank transfer. The appointment appears on the staff schedule only after admin confirms payment.</div></td></tr>`
+    ? `<tr><td style="padding:0 28px 22px;"><div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:20px;padding:16px;color:#9a3412;font-size:13px;line-height:1.6;"><strong>Important:</strong> this deposit step protects the shop from spam/no-show bookings. Please use the reference above on your bank transfer. The appointment appears on the staff schedule after the shop confirms the deposit/payment.</div></td></tr>`
     : "";
 
   const cta = url
@@ -133,11 +133,18 @@ function composeCustomerMessage(booking: CustomerBooking, event: CustomerEvent) 
   const service = serviceSummary(booking);
   const when = `${formatDate(booking.date)} at ${booking.time}`;
 
-  if (event === "booking_created" || event === "booking_email_verification" || event === "payment_transfer_link") {
+  if (event === "booking_created" || event === "booking_email_verification") {
+    return {
+      subject: `${SHOP_NAME}: booking request received (${ref})`,
+      message: `Hi ${booking.customerName}, your booking request for ${service} on ${when} has been received. Reference: ${ref}. Amount: ${money(booking.totalPrice)}. Staff have been notified and one staff member will accept/confirm the booking if they can take this slot. You can view your bookings here: ${PUBLIC_BOOKING_URL}.`,
+    };
+  }
+
+  if (event === "payment_transfer_link") {
     const transferUrl = (booking as any).paymentTransferUrl || (booking as any).emailVerificationUrl || PUBLIC_BOOKING_URL;
     return {
-      subject: `${SHOP_NAME}: secure payment link for your booking (${ref})`,
-      message: `Hi ${booking.customerName}, your account email is verified and your booking request for ${service} on ${when} has been received. Reference: ${ref}. Amount: ${money(booking.totalPrice)}. Click this secure transfer link within 3 minutes to lock one available staff member for this slot: ${transferUrl}. Use ${ref} as the bank-transfer reference. The appointment will only appear on the staff schedule after the shop/admin confirms the bank transfer. If the 3-minute lock expires, please reopen the booking flow or contact the shop before transferring.`,
+      subject: `${SHOP_NAME}: deposit link for your booking (${ref})`,
+      message: `Hi ${booking.customerName}, your booking request for ${service} on ${when} has been received. Reference: ${ref}. Amount: ${money(booking.totalPrice)}. To protect the shop from spam/no-show bookings, this slot requires a deposit before staff assignment. Open this secure deposit link: ${transferUrl}. Use ${ref} as the bank-transfer reference. The appointment will appear on the staff schedule after the shop/admin confirms the deposit/payment.`,
     };
   }
 

@@ -3,6 +3,7 @@ import { BookingStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
 import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from "@/lib/booking-workflow";
+import { isStaffAvailableAndFree } from "@/lib/availability";
 import { notifyBookingStatusChanged } from "@/lib/notifications";
 import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
 
@@ -40,10 +41,16 @@ export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   const scope = searchParams.get("scope") || "dashboard";
 
+  const requestedStaffFilter = staffProfile
+    ? { OR: [{ requestedStaffId: null }, { requestedStaffId: staffProfile.id }] }
+    : {};
   const availableWhere = {
-    status: "CONFIRMED" as BookingStatus,
+    status: "PENDING" as BookingStatus,
     staffId: null,
     archivedAt: null,
+    emailVerifiedAt: { not: null },
+    depositRequired: false,
+    ...requestedStaffFilter,
   };
 
   const mineWhere = staffProfile
@@ -106,45 +113,45 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Staff profile not found for this login" }, { status: 403 });
   }
 
-  const existing = await prisma.booking.findUnique({ where: { id }, include: { staff: true } });
+  const existing = await prisma.booking.findUnique({ where: { id }, include: { staff: true, services: { include: { service: true } } } });
   if (!existing) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
   if (existing.archivedAt) return NextResponse.json({ error: "Archived bookings cannot be changed from Staff Portal" }, { status: 409 });
 
   if (action === "claim" || action === "accept") {
-    if (existing.status !== "CONFIRMED" || !existing.emailVerifiedAt || !existing.paymentConfirmedAt) {
-      return NextResponse.json({ error: "Owner/Manager must verify email and confirm payment before staff can accept the job" }, { status: 403 });
+    if (existing.status !== "PENDING" || !existing.emailVerifiedAt) {
+      return NextResponse.json({ error: "Only verified pending booking requests can be accepted by staff" }, { status: 403 });
+    }
+    if ((existing as any).depositRequired && !(existing as any).paymentConfirmedAt) {
+      return NextResponse.json({ error: "This booking requires deposit confirmation before staff can accept it" }, { status: 403 });
     }
     if (existing.staffId && (!staffProfile || existing.staffId !== staffProfile.id)) {
       return NextResponse.json({ error: "This booking is already assigned to another staff member" }, { status: 409 });
     }
-    if (!staffProfile) return NextResponse.json({ error: "Staff profile is required to accept a job" }, { status: 403 });
+    if (!staffProfile) return NextResponse.json({ error: "Staff profile is required to accept a booking" }, { status: 403 });
+    if (existing.requestedStaffId && existing.requestedStaffId !== staffProfile.id && authUser.role === "STAFF") {
+      return NextResponse.json({ error: "This booking was requested for another staff member" }, { status: 403 });
+    }
+
+    const duration = (existing.services || []).reduce((sum: number, item: any) => sum + Number(item.service?.duration || 0), 0) || 30;
+    const available = await isStaffAvailableAndFree(prisma, staffProfile.id, existing.date, existing.time, duration, existing.id);
+    if (!available) {
+      return NextResponse.json({ error: "You are not available for this booking time" }, { status: 409 });
+    }
 
     const booking = await prisma.$transaction(async (tx) => {
-      const updated = await tx.booking.update({
-        where: { id },
-        data: { staffId: staffProfile.id, staffRejectedAt: null, staffRejectionReason: null, staffRejectionBy: null },
-        include: bookingInclude,
+      const updated = await updateBookingStatusWithRevenue(tx, id, "CONFIRMED", {
+        staffId: staffProfile.id,
+        staffRejectedAt: null,
+        staffRejectionReason: null,
+        staffRejectionBy: null,
+        paymentHoldStaffId: null,
+        paymentConfirmedAt: (existing as any).depositRequired ? ((existing as any).paymentConfirmedAt || new Date()) : null,
+        paymentConfirmedBy: (existing as any).depositRequired ? ((existing as any).paymentConfirmedBy || staffProfile.name) : null,
       });
-      await tx.notification.createMany({ data: [
-        {
-          audience: "ADMIN",
-          staffId: staffProfile.id,
-          bookingId: id,
-          type: "STAFF_ACCEPTED_JOB",
-          title: "Staff accepted job",
-          message: `${staffProfile.name} accepted ${updated.customerName}'s booking. Customer was not re-confirmed; this is an internal assignment update.`,
-        },
-        {
-          audience: "STAFF",
-          staffId: staffProfile.id,
-          bookingId: id,
-          type: "STAFF_JOB_ASSIGNED",
-          title: "Job added to your schedule",
-          message: `You accepted ${updated.customerName}'s booking for ${updated.date.toISOString().slice(0, 10)} at ${updated.time}.`,
-        },
-      ] });
+      await notifyBookingStatusChanged(tx, updated, staffProfile.name);
       return updated;
     });
+    await deliverPendingCustomerNotifications(prisma, booking.id);
     return NextResponse.json({ booking: serializeBooking(booking) });
   }
 

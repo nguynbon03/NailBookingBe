@@ -8,20 +8,20 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  name      String
-  role      Role     @default(CUSTOMER)
-  phone                         String?
-  avatar                        String?
-  emailVerifiedAt               DateTime?
-  emailVerificationTokenHash    String?
-  emailVerificationExpiresAt    DateTime?
-  emailVerificationSentAt       DateTime?
-  createdAt                     DateTime @default(now())
-  updatedAt                     DateTime @updatedAt
-  bookings                      Booking[]
+  id                         String    @id @default(cuid())
+  email                      String    @unique
+  password                   String
+  name                       String
+  role                       Role      @default(CUSTOMER)
+  phone                      String?
+  avatar                     String?
+  emailVerifiedAt            DateTime?
+  emailVerificationTokenHash String?
+  emailVerificationExpiresAt DateTime?
+  emailVerificationSentAt    DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+  bookings                   Booking[]
 }
 
 enum Role {
@@ -32,59 +32,60 @@ enum Role {
 }
 
 model Service {
-  id          String   @id @default(cuid())
+  id          String           @id @default(cuid())
   name        String
   category    String
-  price       Decimal  @db.Decimal(10, 2)
+  price       Decimal          @db.Decimal(10, 2)
   duration    Int
   description String?
   image       String?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  active      Boolean          @default(true)
+  createdAt   DateTime         @default(now())
   bookings    BookingService[]
 }
 
 model Staff {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  phone     String?
-  role      String
-  bio       String?
-  avatar    String?
-  active    Boolean  @default(true)
-  bookings     Booking[]
-  availability StaffAvailability[]
-  leaveRequests StaffLeaveRequest[]
+  id                String              @id @default(cuid())
+  name              String
+  email             String              @unique
+  phone             String?
+  role              String
+  bio               String?
+  avatar            String?
+  active            Boolean             @default(true)
+  bookings          Booking[]           @relation("AssignedStaff")
+  requestedBookings Booking[]           @relation("RequestedStaff")
+  availability      StaffAvailability[]
+  leaveRequests     StaffLeaveRequest[]
 }
 
 model StaffLeaveRequest {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   staffId     String
   startDate   DateTime
   endDate     DateTime
   daysCount   Int
   reason      String
-  status      String   @default("PENDING")
+  status      String    @default("PENDING")
   managerNote String?
   reviewedBy  String?
   reviewedAt  DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  staff       Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  staff       Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
 }
 
 model StaffAvailability {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   staffId   String
   dayOfWeek Int?
   date      DateTime?
   startTime String
   endTime   String
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  staff     Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
 }
 
 model Notification {
@@ -118,43 +119,49 @@ model CustomerNotification {
 }
 
 model Booking {
-  id             String        @id @default(cuid())
-  userId         String?
-  staffId        String?
-  customerName   String
-  customerPhone  String
-  customerEmail  String?
-  date           DateTime
-  time           String
-  status                         BookingStatus @default(PENDING)
-  totalPrice                     Decimal       @db.Decimal(10, 2)
-  discount                       Decimal?      @db.Decimal(10, 2)
-  promoCode                      String?
-  emailVerifiedAt                DateTime?
-  emailVerificationTokenHash     String?
-  emailVerificationExpiresAt     DateTime?
-  emailVerificationSentAt        DateTime?
-  cancellationReason             String?
-  paymentConfirmedAt             DateTime?
-  paymentConfirmedBy             String?
-  staffRejectedAt                DateTime?
-  staffRejectionReason           String?
-  staffRejectionBy               String?
-  requestedStaffId               String?
-  paymentTransferTokenHash       String?
-  paymentTransferExpiresAt       DateTime?
-  paymentTransferOpenedAt        DateTime?
-  paymentHoldStaffId             String?
-  paymentHoldStartedAt           DateTime?
-  paymentHoldExpiresAt           DateTime?
-  paymentReference               String?
-  archivedAt                     DateTime?
-  notes                          String?
-  createdAt                      DateTime      @default(now())
-  updatedAt                      DateTime      @updatedAt
-  user           User?         @relation(fields: [userId], references: [id])
-  staff          Staff?        @relation(fields: [staffId], references: [id])
-  services       BookingService[]
+  id                         String           @id @default(cuid())
+  userId                     String?
+  staffId                    String?
+  customerName               String
+  customerPhone              String
+  customerEmail              String?
+  date                       DateTime
+  time                       String
+  status                     BookingStatus    @default(PENDING)
+  totalPrice                 Decimal          @db.Decimal(10, 2)
+  discount                   Decimal?         @db.Decimal(10, 2)
+  promoCode                  String?
+  emailVerifiedAt            DateTime?
+  emailVerificationTokenHash String?
+  emailVerificationExpiresAt DateTime?
+  emailVerificationSentAt    DateTime?
+  cancellationReason         String?
+  paymentConfirmedAt         DateTime?
+  paymentConfirmedBy         String?
+  staffRejectedAt            DateTime?
+  staffRejectionReason       String?
+  staffRejectionBy           String?
+  requestedStaffId           String?
+  paymentTransferTokenHash   String?
+  paymentTransferExpiresAt   DateTime?
+  paymentTransferOpenedAt    DateTime?
+  paymentHoldStaffId         String?
+  paymentHoldStartedAt       DateTime?
+  paymentHoldExpiresAt       DateTime?
+  paymentReference           String?
+  archivedAt                 DateTime?
+  notes                      String?
+  sourceIp                   String?
+  userAgent                  String?
+  depositRequired            Boolean          @default(false)
+  depositAmount              Decimal?         @db.Decimal(10, 2)
+  depositModeSnapshot        String?
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+  user                       User?            @relation(fields: [userId], references: [id])
+  staff                      Staff?           @relation("AssignedStaff", fields: [staffId], references: [id])
+  requestedStaff             Staff?           @relation("RequestedStaff", fields: [requestedStaffId], references: [id])
+  services                   BookingService[]
 }
 
 model BookingService {
@@ -195,4 +202,34 @@ model PromoCode {
   endsAt          DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+}
+
+model BookingProtectionSetting {
+  id                           String   @id @default("default")
+  depositMode                  String   @default("SMART")
+  depositAmount                Decimal  @default(10.00) @db.Decimal(10, 2)
+  highValueThreshold           Decimal  @default(50.00) @db.Decimal(10, 2)
+  maxActiveBookingsPerCustomer Int      @default(2)
+  maxBookingsPerPhonePerDay    Int      @default(3)
+  maxBookingsPerEmailPerDay    Int      @default(3)
+  maxBookingsPerIpPerDay       Int      @default(8)
+  requireDepositForNewCustomer Boolean  @default(true)
+  requireDepositForWeekend     Boolean  @default(true)
+  requireDepositForHighValue   Boolean  @default(true)
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+}
+
+model CustomerBlocklist {
+  id        String   @id @default(cuid())
+  type      String
+  value     String
+  reason    String?
+  active    Boolean  @default(true)
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([type, value])
+  @@index([active, type, value])
 }

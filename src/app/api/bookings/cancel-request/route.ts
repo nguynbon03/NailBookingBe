@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
-import { bookingInclude, serializeBooking } from "@/lib/booking-workflow";
+import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from "@/lib/booking-workflow";
+import { notifyBookingStatusChanged } from "@/lib/notifications";
+import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
 import { bookingReference } from "@/lib/payment-locks";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +37,27 @@ export async function POST(req: NextRequest) {
   const reference = booking.paymentReference || bookingReference(booking.id);
   const noteLine = `[Customer cancellation request ${now.toISOString()}] Ref ${reference}. Reason: ${reason}`;
 
+  const shouldAutoCancel = booking.status === "PENDING";
+
   const updated = await prisma.$transaction(async (tx) => {
+    if (shouldAutoCancel) {
+      const saved = await updateBookingStatusWithRevenue(tx, booking.id, "CANCELLED", {
+        cancellationReason: `Customer cancelled before confirmation: ${reason}`,
+        notes: appendNote(booking.notes, noteLine),
+      });
+      await notifyBookingStatusChanged(tx, saved, booking.customerName);
+      await tx.notification.create({
+        data: {
+          audience: "ADMIN",
+          bookingId: booking.id,
+          type: "CUSTOMER_CANCELLED_PENDING_BOOKING",
+          title: "Pending booking cancelled by customer",
+          message: `${booking.customerName} cancelled pending booking ${reference}. The slot is now released. Reason: ${reason}.`,
+        },
+      });
+      return saved;
+    }
+
     const saved = await tx.booking.update({
       where: { id: booking.id },
       data: {
@@ -56,9 +78,12 @@ export async function POST(req: NextRequest) {
     return saved;
   });
 
+  if (shouldAutoCancel) await deliverPendingCustomerNotifications(prisma, updated.id);
+
   return NextResponse.json({
     booking: serializeBooking(updated),
-    requested: true,
-    message: "Cancellation request sent to admin.",
+    requested: !shouldAutoCancel,
+    cancelled: shouldAutoCancel,
+    message: shouldAutoCancel ? "Pending booking cancelled and slot released." : "Cancellation request sent to admin.",
   });
 }

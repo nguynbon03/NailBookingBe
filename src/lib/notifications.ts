@@ -6,17 +6,34 @@ type PrismaTx = Omit<
   "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
 >;
 
-export async function notifyBookingCreated(tx: PrismaTx, booking: any, paymentTransferUrl?: string) {
-  await tx.notification.create({
-    data: {
+export async function notifyBookingCreated(tx: PrismaTx, booking: any, paymentTransferUrl?: string, depositReasons: string[] = []) {
+  const day = booking.date.toISOString().slice(0, 10);
+  const depositRequired = Boolean(booking.depositRequired || paymentTransferUrl);
+  const reasonText = depositReasons.length ? ` Reason: ${depositReasons.join(", ")}.` : "";
+  const data: any[] = [
+    {
       audience: "ADMIN",
       bookingId: booking.id,
-      type: "BOOKING_AWAITING_TRANSFER",
-      title: "Booking awaiting transfer lock",
-      message: `${booking.customerName} requested ${booking.date.toISOString().slice(0, 10)} at ${booking.time}. Customer must open the secure transfer link within 3 minutes to lock a staff slot; only confirm after bank transfer is received.`,
+      type: depositRequired ? "BOOKING_DEPOSIT_REQUIRED" : "BOOKING_REQUEST_CREATED",
+      title: depositRequired ? "New booking needs deposit" : "New booking request",
+      message: depositRequired
+        ? `${booking.customerName} requested ${day} at ${booking.time}. Anti-spam protection requires a deposit before staff assignment.${reasonText}`
+        : `${booking.customerName} requested ${day} at ${booking.time}. Staff can accept this booking from Staff Portal.`,
     },
-  });
-  await queueCustomerBookingNotification(tx, { ...booking, paymentTransferUrl }, "payment_transfer_link");
+  ];
+
+  if (!depositRequired) {
+    data.push({
+      audience: "STAFF",
+      bookingId: booking.id,
+      type: "BOOKING_AVAILABLE_FOR_STAFF",
+      title: "New booking waiting for staff",
+      message: `${booking.customerName} requested ${day} at ${booking.time}. Open Staff Portal and accept if you can take this job.`,
+    });
+  }
+
+  await tx.notification.createMany({ data });
+  await queueCustomerBookingNotification(tx, { ...booking, paymentTransferUrl }, depositRequired ? "payment_transfer_link" : "booking_created");
 }
 
 export async function notifyBookingStatusChanged(
@@ -24,7 +41,7 @@ export async function notifyBookingStatusChanged(
   booking: any,
   actorName: string
 ) {
-  const staffName = booking.staff?.name || actorName;
+  const staffName = booking.staff?.name || booking.requestedStaff?.name || actorName;
   const base = `${booking.customerName}: ${booking.status}${staffName ? ` by ${staffName}` : ""}.`;
   const data = [
     {
@@ -42,9 +59,9 @@ export async function notifyBookingStatusChanged(
       audience: "STAFF",
       staffId: null,
       bookingId: booking.id,
-      type: "PAID_JOB_AVAILABLE",
-      title: "New paid job available",
-      message: `${booking.customerName} paid for ${booking.date.toISOString().slice(0, 10)} at ${booking.time}. Open Staff Portal and accept the job if you can take it.`,
+      type: "BOOKING_AVAILABLE_FOR_STAFF",
+      title: "Booking ready for staff",
+      message: `${booking.customerName}'s booking for ${booking.date.toISOString().slice(0, 10)} at ${booking.time} is ready. Open Staff Portal and accept the job if you can take it.`,
     });
   }
 

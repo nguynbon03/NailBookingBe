@@ -6,8 +6,9 @@ import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from
 import { hasAnyAvailableStaff, isStaffAvailableAndFree, availableStaffIdsAt } from "@/lib/availability";
 import { notifyBookingCreated, notifyBookingStatusChanged } from "@/lib/notifications";
 import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
-import { createVerificationToken, hashVerificationToken, isValidEmail, normalizeEmail } from "@/lib/email-verification";
+import { createVerificationToken, isValidEmail, normalizeEmail } from "@/lib/email-verification";
 import { bookingReference, paymentTransferUrl } from "@/lib/payment-locks";
+import { assessBookingProtection } from "@/lib/booking-protection";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -130,8 +131,15 @@ export async function POST(req: NextRequest) {
     }
     if (totalPrice < 0) totalPrice = 0;
 
-    const transfer = createVerificationToken(3);
-    const transferUrl = paymentTransferUrl(transfer.token);
+    const protection = await assessBookingProtection(prisma, req, {
+      authUser,
+      email,
+      phone,
+      requestedDate,
+      totalPrice,
+    });
+    const transfer = protection.depositRequired ? createVerificationToken(30) : null;
+    const transferUrl = transfer ? paymentTransferUrl(transfer.token) : null;
 
     const booking = await prisma.$transaction(async (tx) => {
       const created = await tx.booking.create({
@@ -149,9 +157,14 @@ export async function POST(req: NextRequest) {
           discount: discountAmount > 0 ? discountAmount : null,
           promoCode: appliedPromoCode,
           emailVerifiedAt: new Date(),
-          paymentTransferTokenHash: transfer.tokenHash,
-          paymentTransferExpiresAt: transfer.expiresAt,
+          paymentTransferTokenHash: transfer?.tokenHash || null,
+          paymentTransferExpiresAt: transfer?.expiresAt || null,
           paymentReference: null,
+          sourceIp: protection.sourceIp,
+          userAgent: protection.userAgent,
+          depositRequired: protection.depositRequired,
+          depositAmount: protection.depositRequired ? protection.depositAmount : null,
+          depositModeSnapshot: protection.depositMode,
           notes: notes ? String(notes) : null,
           services: { create: services.map((service) => ({ serviceId: service.id })) },
         },
@@ -162,7 +175,7 @@ export async function POST(req: NextRequest) {
         data: { paymentReference: bookingReference(created.id) },
         include: bookingInclude,
       });
-      await notifyBookingCreated(tx, withRef, transferUrl);
+      await notifyBookingCreated(tx, withRef, transferUrl || undefined, protection.reasons);
       return withRef;
     });
 
@@ -170,15 +183,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       booking: serializeBooking(booking),
       verification: {
-        status: "AWAITING_TRANSFER_LOCK",
+        status: protection.depositRequired ? "DEPOSIT_REQUIRED" : "AWAITING_STAFF_ACCEPTANCE",
         reference: booking.paymentReference || bookingReference(booking.id),
         expiresAt: booking.paymentTransferExpiresAt,
-        instructions: "Open the secure transfer link sent by email within 3 minutes. Opening the link locks one available staff member for this time slot while you transfer.",
+        depositRequired: protection.depositRequired,
+        depositAmount: protection.depositAmount,
+        depositReasons: protection.reasons,
+        instructions: protection.depositRequired
+          ? "This booking needs a deposit before staff assignment. Open the secure deposit link sent by email and use the booking reference when transferring."
+          : "Your booking request has been sent to staff. A staff member will accept/confirm it if they can take this slot.",
       },
       notificationDelivery,
     });
-  } catch (e) {
-    return NextResponse.json({ error: "Booking failed" }, { status: 500 });
+  } catch (e: any) {
+    const message = e instanceof Error && e.message ? e.message : "Booking failed";
+    const status = message.startsWith("Booking blocked") || message.startsWith("Booking limit") ? 429 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }
 
@@ -229,7 +249,7 @@ export async function PUT(req: NextRequest) {
 
   const target = await prisma.booking.findUnique({
     where: { id: String(id) },
-    include: { services: { include: { service: true } }, staff: true },
+    include: { services: { include: { service: true } }, staff: true, requestedStaff: true },
   });
   if (!target) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
   if (status === "CONFIRMED" && !target.emailVerifiedAt) {
@@ -239,15 +259,15 @@ export async function PUT(req: NextRequest) {
   const totalDuration = (target.services || []).reduce((sum: number, item: any) => sum + Number(item.service?.duration || 0), 0) || 30;
   let confirmedStaffId: string | null | undefined = staffId === undefined ? undefined : (staffId || null);
   if (status === "CONFIRMED") {
-    confirmedStaffId = confirmedStaffId || target.staffId || target.paymentHoldStaffId || null;
+    confirmedStaffId = confirmedStaffId || target.staffId || target.requestedStaffId || target.paymentHoldStaffId || null;
     if (confirmedStaffId) {
       const ok = await isStaffAvailableAndFree(prisma, confirmedStaffId, target.date, target.time, totalDuration, target.id);
       if (!ok) {
-        return NextResponse.json({ error: "The locked staff is no longer available for this slot. Reassign before confirming payment." }, { status: 409 });
+        return NextResponse.json({ error: "The selected staff is no longer available for this slot. Reassign before confirming." }, { status: 409 });
       }
     } else {
       const free = await availableStaffIdsAt(prisma, target.date, target.time, totalDuration);
-      if (!free.length) return NextResponse.json({ error: "No staff is available for this paid slot" }, { status: 409 });
+      if (!free.length) return NextResponse.json({ error: "No staff is available for this slot" }, { status: 409 });
       confirmedStaffId = free[0];
     }
   }
@@ -257,9 +277,9 @@ export async function PUT(req: NextRequest) {
     if (staffId !== undefined) extraData.staffId = staffId || null;
     if (status === "CONFIRMED") {
       extraData.staffId = confirmedStaffId || null;
-      extraData.paymentHoldStaffId = confirmedStaffId || target.paymentHoldStaffId || null;
-      extraData.paymentConfirmedAt = target.paymentConfirmedAt || new Date();
-      extraData.paymentConfirmedBy = authUser.name || authUser.email;
+      extraData.paymentHoldStaffId = null;
+      extraData.paymentConfirmedAt = target.depositRequired ? (target.paymentConfirmedAt || new Date()) : null;
+      extraData.paymentConfirmedBy = target.depositRequired ? (authUser.name || authUser.email) : null;
       extraData.paymentReference = target.paymentReference || bookingReference(target.id);
     }
     if (status === "PENDING") {
