@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { availableStaffIdsAt, isStaffAvailableAndFree } from "@/lib/availability";
-import { bookingInclude, serializeBooking } from "@/lib/booking-workflow";
+import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from "@/lib/booking-workflow";
 import { hashVerificationToken } from "@/lib/email-verification";
-import { bookingReference, isStaffSlotLocked, PAYMENT_HOLD_TTL_SECONDS, publicBankTransferDetails, refreshStaffSlotRedisLock, releaseStaffSlotRedisLock, setStaffSlotRedisLock } from "@/lib/payment-locks";
+import { bookingReference, publicBankTransferDetails, releaseStaffSlotRedisLock } from "@/lib/payment-locks";
+import { notifyBookingStatusChanged } from "@/lib/notifications";
+import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -13,8 +15,27 @@ function durationFromBooking(booking: any) {
   return total || 30;
 }
 
-function holdExpiresAt() {
-  return new Date(Date.now() + PAYMENT_HOLD_TTL_SECONDS * 1000);
+function appendNote(existing: string | null | undefined, line: string) {
+  const current = String(existing || "").trim();
+  return [current, line].filter(Boolean).join("\n").slice(0, 4000);
+}
+
+async function chooseStaffForPaidBooking(booking: any) {
+  const duration = durationFromBooking(booking);
+  const preferred = booking.requestedStaffId || booking.staffId || booking.paymentHoldStaffId || null;
+  const candidates: string[] = [];
+
+  if (preferred) {
+    const ok = await isStaffAvailableAndFree(prisma, preferred, booking.date, booking.time, duration, booking.id);
+    if (ok) candidates.push(preferred);
+  }
+
+  const fallback = await availableStaffIdsAt(prisma, booking.date, booking.time, duration);
+  for (const id of fallback) {
+    if (!candidates.includes(id)) candidates.push(id);
+  }
+
+  return candidates[0] || null;
 }
 
 export async function POST(req: NextRequest) {
@@ -32,77 +53,108 @@ export async function POST(req: NextRequest) {
   if (booking.archivedAt || booking.status === "CANCELLED") {
     return NextResponse.json({ error: "This booking is not payable" }, { status: 409 });
   }
-  if (booking.status !== "PENDING") {
-    return NextResponse.json({ booking: serializeBooking(booking), alreadyConfirmed: booking.status === "CONFIRMED", bank: publicBankTransferDetails() });
-  }
   if (!booking.emailVerifiedAt) {
     return NextResponse.json({ error: "Account email must be verified before payment" }, { status: 403 });
   }
 
+  const reference = booking.paymentReference || bookingReference(booking.id);
   const now = new Date();
-  if (!booking.paymentTransferExpiresAt || booking.paymentTransferExpiresAt < now) {
-    return NextResponse.json({ error: "This transfer link expired. Please create a new booking request so we do not lock staff unfairly." }, { status: 410 });
-  }
 
-  const existingHoldValid = booking.paymentHoldStaffId && booking.paymentHoldExpiresAt && booking.paymentHoldExpiresAt > now;
-  if (existingHoldValid) {
-    await refreshStaffSlotRedisLock(booking.id, booking.paymentHoldStaffId!, booking.date, booking.time);
+  if (booking.status !== "PENDING") {
     return NextResponse.json({
       booking: serializeBooking(booking),
-      locked: true,
-      staffId: booking.paymentHoldStaffId,
-      expiresAt: booking.paymentHoldExpiresAt,
-      reference: booking.paymentReference || bookingReference(booking.id),
+      paid: Boolean(booking.paymentConfirmedAt),
+      confirmed: booking.status === "CONFIRMED",
+      alreadyHandled: true,
+      reference,
       bank: publicBankTransferDetails(),
+      message: booking.status === "CONFIRMED"
+        ? "Payment already recorded and booking is confirmed."
+        : "Payment already recorded. The shop will manage the booking.",
     });
   }
 
-  const duration = durationFromBooking(booking);
-  let candidates: string[] = [];
-  const requestedStaffId = booking.requestedStaffId || booking.staffId || null;
-  if (requestedStaffId) {
-    const ok = await isStaffAvailableAndFree(prisma, requestedStaffId, booking.date, booking.time, duration);
-    const locked = await isStaffSlotLocked(prisma, requestedStaffId, booking.date, booking.time, booking.id);
-    if (ok && !locked) candidates = [requestedStaffId];
-  } else {
-    candidates = await availableStaffIdsAt(prisma, booking.date, booking.time, duration);
-  }
+  const staffId = await chooseStaffForPaidBooking(booking);
+  const openedNote = `[Secure transfer opened ${now.toISOString()}] Ref ${reference}. Customer click is treated as payment received per shop rule.`;
 
-  for (const staffId of candidates) {
-    const redisLocked = await setStaffSlotRedisLock(booking.id, staffId, booking.date, booking.time);
-    if (!redisLocked) continue;
-
-    try {
-      const expiresAt = holdExpiresAt();
-      const updated = await prisma.$transaction(async (tx) => {
-        const locked = await isStaffSlotLocked(tx, staffId, booking.date, booking.time, booking.id);
-        if (locked) throw new Error("slot_locked");
-        return tx.booking.update({
-          where: { id: booking.id },
-          data: {
-            staffId,
-            paymentHoldStaffId: staffId,
-            paymentHoldStartedAt: now,
-            paymentHoldExpiresAt: expiresAt,
-            paymentTransferOpenedAt: booking.paymentTransferOpenedAt || now,
-            paymentReference: booking.paymentReference || bookingReference(booking.id),
-          },
-          include: bookingInclude,
-        });
-      });
-      return NextResponse.json({
-        booking: serializeBooking(updated),
-        locked: true,
+  if (staffId) {
+    const confirmed = await prisma.$transaction(async (tx) => {
+      const updated = await updateBookingStatusWithRevenue(tx, booking.id, "CONFIRMED", {
         staffId,
-        expiresAt: updated.paymentHoldExpiresAt,
-        reference: updated.paymentReference || bookingReference(updated.id),
-        bank: publicBankTransferDetails(),
+        paymentHoldStaffId: null,
+        paymentHoldStartedAt: null,
+        paymentHoldExpiresAt: null,
+        paymentTransferOpenedAt: booking.paymentTransferOpenedAt || now,
+        paymentConfirmedAt: booking.paymentConfirmedAt || now,
+        paymentConfirmedBy: "Customer secure-transfer click",
+        paymentReference: reference,
+        notes: appendNote(booking.notes, `${openedNote} Staff assigned automatically.`),
       });
-    } catch (error) {
-      await releaseStaffSlotRedisLock(booking.id, staffId, booking.date, booking.time);
-      if (!(error instanceof Error) || error.message !== "slot_locked") throw error;
-    }
+      await notifyBookingStatusChanged(tx, updated, "Secure transfer");
+      await tx.notification.create({
+        data: {
+          audience: "ADMIN",
+          bookingId: booking.id,
+          staffId,
+          type: "PAYMENT_AUTO_CONFIRMED",
+          title: "Secure transfer auto-confirmed booking",
+          message: `${booking.customerName} clicked secure transfer for ${reference}. Payment is treated as received and booking was confirmed with an available staff member.`,
+        },
+      });
+      return updated;
+    });
+
+    if (booking.paymentHoldStaffId) await releaseStaffSlotRedisLock(booking.id, booking.paymentHoldStaffId, booking.date, booking.time);
+    await deliverPendingCustomerNotifications(prisma, confirmed.id);
+
+    return NextResponse.json({
+      booking: serializeBooking(confirmed),
+      paid: true,
+      confirmed: true,
+      needsAdminResolution: false,
+      reference,
+      bank: publicBankTransferDetails(),
+      message: "Payment recorded. Your booking is confirmed.",
+    });
   }
 
-  return NextResponse.json({ error: "No staff is still free for this time. Please choose another time before transferring." }, { status: 409 });
+  const pending = await prisma.$transaction(async (tx) => {
+    const updated = await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        staffId: null,
+        paymentHoldStaffId: null,
+        paymentHoldStartedAt: null,
+        paymentHoldExpiresAt: null,
+        paymentTransferOpenedAt: booking.paymentTransferOpenedAt || now,
+        paymentConfirmedAt: booking.paymentConfirmedAt || now,
+        paymentConfirmedBy: "Customer secure-transfer click",
+        paymentReference: reference,
+        notes: appendNote(booking.notes, `${openedNote} No staff was free at click time; admin must refund, change time, or find replacement staff.`),
+      },
+      include: bookingInclude,
+    });
+    await tx.notification.create({
+      data: {
+        audience: "ADMIN",
+        bookingId: booking.id,
+        type: "PAYMENT_NEEDS_ADMIN_RESOLUTION",
+        title: "Paid booking needs admin resolution",
+        message: `${booking.customerName} clicked secure transfer for ${reference}, but no staff was free for ${booking.date.toISOString().slice(0, 10)} at ${booking.time}. Admin must refund, move the appointment, or find replacement staff.`,
+      },
+    });
+    return updated;
+  });
+
+  if (booking.paymentHoldStaffId) await releaseStaffSlotRedisLock(booking.id, booking.paymentHoldStaffId, booking.date, booking.time);
+
+  return NextResponse.json({
+    booking: serializeBooking(pending),
+    paid: true,
+    confirmed: false,
+    needsAdminResolution: true,
+    reference,
+    bank: publicBankTransferDetails(),
+    message: "Payment recorded. The shop will contact you to confirm the time/staff, move the appointment, or arrange a refund if needed.",
+  });
 }
