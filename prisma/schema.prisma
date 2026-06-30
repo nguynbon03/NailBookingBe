@@ -89,16 +89,18 @@ model StaffAvailability {
 }
 
 model Notification {
-  id        String   @id @default(cuid())
-  audience  String
-  userId    String?
-  staffId   String?
-  bookingId String?
-  type      String
-  title     String
-  message   String
-  read      Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  audience   String
+  userId     String?
+  staffId    String?
+  bookingId  String?
+  entityType String?
+  entityId   String?
+  type       String
+  title      String
+  message    String
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
 }
 
 model CustomerNotification {

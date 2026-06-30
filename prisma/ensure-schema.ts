@@ -41,12 +41,20 @@ async function main() {
       "userId" TEXT,
       "staffId" TEXT,
       "bookingId" TEXT,
+      "entityType" TEXT,
+      "entityId" TEXT,
       "type" TEXT NOT NULL,
       "title" TEXT NOT NULL,
       "message" TEXT NOT NULL,
       "read" BOOLEAN NOT NULL DEFAULT false,
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Notification" ADD COLUMN IF NOT EXISTS "entityType" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Notification" ADD COLUMN IF NOT EXISTS "entityId" TEXT;
   `);
 
   await prisma.$executeRawUnsafe(`

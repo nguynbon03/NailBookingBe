@@ -102,6 +102,8 @@ export async function POST(req: NextRequest) {
       data: {
         audience: "ADMIN",
         staffId: staff.id,
+        entityType: "STAFF_LEAVE",
+        entityId: created.id,
         type: "STAFF_LEAVE_REQUESTED",
         title: "Staff requested leave",
         message: `${staff.name} requested ${created.daysCount} day(s) off from ${startDate.toISOString().slice(0, 10)} to ${endDate.toISOString().slice(0, 10)}. Reason: ${reason}. Review it before planning staff schedule.`,
@@ -190,29 +192,32 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { id, hardDelete } = await req.json().catch(() => ({}));
+  const body = await req.json().catch(() => ({}));
+  const { id, hardDelete } = body;
+  const ids = Array.isArray(body.ids) ? body.ids.map((value: unknown) => String(value || "").trim()).filter(Boolean) : [];
+  const isAdmin = isAdminRole(authUser.role);
+
+  if (isAdmin && (ids.length || body.deleteAll === true)) {
+    const where = body.deleteAll === true ? {} : { id: { in: ids } };
+    const result = await prisma.staffLeaveRequest.deleteMany({ where });
+    await prisma.notification.deleteMany({
+      where: body.deleteAll === true
+        ? { audience: "ADMIN", entityType: "STAFF_LEAVE" }
+        : { audience: "ADMIN", entityType: "STAFF_LEAVE", entityId: { in: ids } },
+    });
+    return NextResponse.json({ success: true, deleted: result.count });
+  }
+
   if (!id) return NextResponse.json({ error: "Leave request id is required" }, { status: 400 });
 
   const existing = await prisma.staffLeaveRequest.findUnique({ where: { id: String(id) }, include: { staff: true } });
   if (!existing) return NextResponse.json({ error: "Leave request not found" }, { status: 404 });
 
   const isOwner = existing.staff.email === authUser.email;
-  const isAdmin = isAdminRole(authUser.role);
   if (!isOwner && !isAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   if (isAdmin && (hardDelete !== false || !isOwner)) {
-    await prisma.$transaction(async (tx) => {
-      await tx.staffLeaveRequest.delete({ where: { id: String(id) } });
-      await tx.notification.create({
-        data: {
-          audience: "ADMIN",
-          staffId: existing.staffId,
-          type: "STAFF_LEAVE_DELETED",
-          title: "Leave request deleted",
-          message: `${authUser.name || "Manager"} deleted ${existing.staff.name}'s leave request from ${existing.startDate.toISOString().slice(0, 10)} to ${existing.endDate.toISOString().slice(0, 10)} to clean the admin list.`,
-        },
-      });
-    });
+    await prisma.staffLeaveRequest.delete({ where: { id: String(id) } });
     return NextResponse.json({ success: true, deleted: true, id: String(id) });
   }
 

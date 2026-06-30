@@ -5,6 +5,18 @@ import { getAuthUser, isAdminRole } from "@/lib/auth";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+const ADMIN_TICKET_TYPES = [
+  "CUSTOMER_CANCEL_REQUEST",
+  "CUSTOMER_CANCELLED_PENDING_BOOKING",
+  "STAFF_LEAVE_REQUESTED",
+  "STAFF_LEAVE_CANCELLED",
+];
+
+function applyNotificationCategory(where: any, category?: string | null) {
+  if (category === "tickets") where.type = { in: ADMIN_TICKET_TYPES };
+  return where;
+}
+
 async function resolveStaffId(email: string) {
   const staff = await prisma.staff.findFirst({ where: { email } });
   return staff?.id || null;
@@ -45,7 +57,8 @@ export async function GET(req: NextRequest) {
 
   const take = Number(req.nextUrl.searchParams.get("take") || 50);
   const unreadOnly = req.nextUrl.searchParams.get("unread") === "1";
-  const where = await notificationScope(req, authUser);
+  const category = req.nextUrl.searchParams.get("category");
+  const where = applyNotificationCategory(await notificationScope(req, authUser), category);
   if (unreadOnly) where.read = false;
 
   const [notifications, unread] = await Promise.all([
@@ -63,7 +76,7 @@ export async function PUT(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const id = body?.id ? String(body.id) : "";
   const read = body?.read !== false;
-  const scope = await scopedWhereFromBody(req, authUser, body);
+  const scope = applyNotificationCategory(await scopedWhereFromBody(req, authUser, body), body?.category ? String(body.category) : null);
 
   if (id) {
     const existing = await prisma.notification.findFirst({ where: { ...scope, id } });
@@ -82,13 +95,19 @@ export async function DELETE(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const id = body?.id ? String(body.id) : "";
-  const scope = await scopedWhereFromBody(req, authUser, body);
+  const ids = Array.isArray(body?.ids) ? body.ids.map((value: unknown) => String(value || "").trim()).filter(Boolean) : [];
+  const scope = applyNotificationCategory(await scopedWhereFromBody(req, authUser, body), body?.category ? String(body.category) : null);
 
   if (id) {
     const existing = await prisma.notification.findFirst({ where: { ...scope, id } });
     if (!existing) return NextResponse.json({ error: "Notification not found" }, { status: 404 });
     await prisma.notification.delete({ where: { id } });
     return NextResponse.json({ success: true, deleted: 1 });
+  }
+
+  if (ids.length) {
+    const result = await prisma.notification.deleteMany({ where: { ...scope, id: { in: ids } } });
+    return NextResponse.json({ success: true, deleted: result.count });
   }
 
   const olderThan = body?.olderThan ? new Date(String(body.olderThan)) : null;
