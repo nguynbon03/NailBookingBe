@@ -166,7 +166,7 @@ export async function POST(req: NextRequest) {
       return withRef;
     });
 
-    await deliverPendingCustomerNotifications(prisma, booking.id);
+    const notificationDelivery = await deliverPendingCustomerNotifications(prisma, booking.id);
     return NextResponse.json({
       booking: serializeBooking(booking),
       verification: {
@@ -175,6 +175,7 @@ export async function POST(req: NextRequest) {
         expiresAt: booking.paymentTransferExpiresAt,
         instructions: "Open the secure transfer link sent by email within 3 minutes. Opening the link locks one available staff member for this time slot while you transfer.",
       },
+      notificationDelivery,
     });
   } catch (e) {
     return NextResponse.json({ error: "Booking failed" }, { status: 500 });
@@ -207,7 +208,9 @@ export async function GET(req: NextRequest) {
       ...(searchParams.get("status") ? { status: searchParams.get("status") as BookingStatus } : {}),
     },
     include: bookingInclude,
-    orderBy: [{ date: "asc" }, { time: "asc" }, { createdAt: "desc" }],
+    orderBy: searchParams.get("date")
+      ? [{ date: "asc" }, { time: "asc" }, { createdAt: "desc" }]
+      : [{ createdAt: "desc" }, { date: "asc" }, { time: "asc" }],
   });
   return NextResponse.json({ bookings: bookings.map(serializeBooking) });
 }

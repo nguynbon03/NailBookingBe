@@ -36,6 +36,54 @@ function serviceSummary(booking: CustomerBooking) {
   return (booking.services || []).map((item) => item.service?.name).filter(Boolean).join(", ") || "your service";
 }
 
+function escapeHtml(value: unknown) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function firstUrl(value: string) {
+  return value.match(/https?:\/\/[^\s)]+/)?.[0] || "";
+}
+
+function renderEmailHtml(subject: string, message: string) {
+  const url = firstUrl(message);
+  const safeSubject = escapeHtml(subject);
+  const paragraphs = message
+    .split(/(?<=\.)\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => `<p style="margin:0 0 12px;color:#475569;font-size:15px;line-height:1.65;">${escapeHtml(part)}</p>`)
+    .join("");
+  const cta = url
+    ? `<tr><td style="padding:8px 28px 28px;text-align:center;"><a href="${escapeHtml(url)}" style="display:inline-block;background:linear-gradient(135deg,#ec4899,#e11d48);color:#ffffff;text-decoration:none;font-weight:800;border-radius:999px;padding:15px 26px;box-shadow:0 14px 30px rgba(236,72,153,.28);">Open secure booking link</a><p style="margin:14px 0 0;color:#94a3b8;font-size:12px;word-break:break-all;">${escapeHtml(url)}</p></td></tr>`
+    : "";
+  return `<!doctype html><html><body style="margin:0;background:#fff1f6;font-family:Inter,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#fff1f6;padding:28px 12px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border-radius:28px;overflow:hidden;border:1px solid #fbcfe8;box-shadow:0 24px 70px rgba(236,72,153,.18);">
+        <tr><td style="background:linear-gradient(135deg,#f9a8d4,#e11d48);padding:34px 28px;text-align:center;color:white;">
+          <div style="display:inline-flex;width:62px;height:62px;border-radius:22px;background:rgba(255,255,255,.22);align-items:center;justify-content:center;font-size:34px;margin-bottom:12px;">✿</div>
+          <div style="font-size:28px;font-weight:900;letter-spacing:-.04em;">Nail Lounge</div>
+          <div style="font-size:12px;font-weight:800;letter-spacing:.45em;text-transform:uppercase;opacity:.9;">Stokesley</div>
+        </td></tr>
+        <tr><td style="padding:28px 28px 8px;">
+          <h1 style="margin:0 0 14px;color:#0f172a;font-size:24px;line-height:1.2;">${safeSubject}</h1>
+          ${paragraphs}
+        </td></tr>
+        ${cta}
+        <tr><td style="padding:18px 28px;background:#f8fafc;color:#64748b;font-size:12px;line-height:1.6;">
+          The Nail Lounge @ Stokesley · 33 High St, Stokesley, TS9 5AD<br />Need help? Call +44 7774 292572 or reply to this email.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+  </body></html>`;
+}
+
 function composeCustomerMessage(booking: CustomerBooking, event: CustomerEvent) {
   const ref = bookingReference(booking.id);
   const service = serviceSummary(booking);
@@ -158,11 +206,13 @@ async function sendEmail(row: any) {
       secure,
       auth: user || pass ? { user, pass } : undefined,
     });
+    const subject = row.subject || `${SHOP_NAME} booking update`;
     const info = await transporter.sendMail({
       from: process.env.SMTP_FROM || process.env.FROM_EMAIL,
       to: row.recipient,
-      subject: row.subject || `${SHOP_NAME} booking update`,
+      subject,
       text: row.message,
+      html: renderEmailHtml(subject, row.message),
     });
     return info.messageId || null;
   }
@@ -177,6 +227,7 @@ async function sendEmail(row: any) {
       to: row.recipient,
       subject: row.subject || `${SHOP_NAME} booking update`,
       text: row.message,
+      html: renderEmailHtml(row.subject || `${SHOP_NAME} booking update`, row.message),
     }),
   });
 
@@ -214,7 +265,10 @@ export async function deliverPendingCustomerNotifications(prisma: PrismaClient, 
     take: 20,
   });
 
+  const summary: Record<string, any> = { total: rows.length, sent: 0, failed: 0, skipped: 0, email: null, sms: null };
+
   for (const row of rows) {
+    const channelKey = String(row.channel || "").toLowerCase();
     try {
       let providerMessageId: string | null = null;
       if (row.channel === "EMAIL") providerMessageId = await sendEmail(row);
@@ -228,14 +282,22 @@ export async function deliverPendingCustomerNotifications(prisma: PrismaClient, 
         attempts: { increment: 1 },
         sentAt: new Date(),
       });
+      summary.sent += 1;
+      summary[channelKey] = { status: "SENT", sent: 1, provider: row.provider, providerMessageId, recipient: row.recipient };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Notification delivery failed";
       const providerMissing = message.includes("provider not configured");
+      const status = providerMissing ? "SKIPPED" : "FAILED";
       await mark(prisma, row.id, {
-        status: providerMissing ? "SKIPPED" : "FAILED",
+        status,
         error: message,
         attempts: { increment: 1 },
       });
+      if (providerMissing) summary.skipped += 1;
+      else summary.failed += 1;
+      summary[channelKey] = { status, sent: 0, provider: row.provider, recipient: row.recipient, error: message };
     }
   }
+
+  return summary;
 }

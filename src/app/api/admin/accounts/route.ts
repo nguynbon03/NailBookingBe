@@ -65,3 +65,30 @@ export async function PUT(req: NextRequest) {
 
   return NextResponse.json({ account, message: `Password reset for ${account.email}` });
 }
+
+export async function DELETE(req: NextRequest) {
+  const authUser = await getAuthUser(req);
+  if (!authUser || authUser.role !== "ADMIN") {
+    return NextResponse.json({ error: "Only ADMIN can delete accounts" }, { status: 403 });
+  }
+
+  const body = await req.json().catch(() => ({}));
+  const id = String(body.id || "");
+  if (!id) return NextResponse.json({ error: "Account id is required" }, { status: 400 });
+  if (id === authUser.id) return NextResponse.json({ error: "You cannot delete your own account" }, { status: 400 });
+
+  const target = await prisma.user.findUnique({ where: { id }, select: { id: true, email: true, name: true, role: true } });
+  if (!target) return NextResponse.json({ error: "Account not found" }, { status: 404 });
+
+  if (target.role === "ADMIN") {
+    const adminCount = await prisma.user.count({ where: { role: "ADMIN" } });
+    if (adminCount <= 1) return NextResponse.json({ error: "Cannot delete the last ADMIN account" }, { status: 409 });
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.booking.updateMany({ where: { userId: id }, data: { userId: null } });
+    await tx.user.delete({ where: { id } });
+  });
+
+  return NextResponse.json({ success: true, deleted: true, account: target });
+}

@@ -13,6 +13,8 @@ const nextConfig: NextConfig = {
       { source: "/bookings", destination: "/api/bookings" },
       { source: "/bookings/:path*", destination: "/api/bookings/:path*" },
       { source: "/promo-codes/:path*", destination: "/api/promo-codes/:path*" },
+      { source: "/payments", destination: "/api/payments" },
+      { source: "/payments/:path*", destination: "/api/payments/:path*" },
       { source: "/auth/:path*", destination: "/api/auth/:path*" },
       { source: "/admin/:path*", destination: "/api/admin/:path*" },
     ];
