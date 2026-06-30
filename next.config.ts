@@ -6,7 +6,10 @@ const nextConfig: NextConfig = {
     return [
       { source: "/health", destination: "/api/health" },
       { source: "/staff", destination: "/api/staff" },
+      { source: "/services", destination: "/api/services" },
       { source: "/bookings", destination: "/api/bookings" },
+      { source: "/bookings/:path*", destination: "/api/bookings/:path*" },
+      { source: "/promo-codes/:path*", destination: "/api/promo-codes/:path*" },
       { source: "/auth/:path*", destination: "/api/auth/:path*" },
       { source: "/admin/:path*", destination: "/api/admin/:path*" },
     ];

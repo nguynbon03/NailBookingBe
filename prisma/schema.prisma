@@ -99,3 +99,17 @@ model Revenue {
   bookingId       String?
   createdAt       DateTime @default(now())
 }
+
+model PromoCode {
+  id              String    @id @default(cuid())
+  code            String    @unique
+  name            String?
+  discountPercent Int       @default(0)
+  active          Boolean   @default(true)
+  usageLimit      Int?
+  usedCount       Int       @default(0)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}

@@ -35,10 +35,15 @@ const services = [
 ];
 
 const staff = [
-  { name: "Sarah Nguyen", email: "sarah@nailbooking.com", phone: "+447774111111", role: "MANICURIST", bio: "Nail extension specialist with 5 years experience", active: true },
-  { name: "Emma Linh", email: "emma@nailbooking.com", phone: "+447774222222", role: "WAXING_SPECIALIST", bio: "Waxing and beauty treatment expert", active: true },
-  { name: "Lily Tran", email: "lily@nailbooking.com", phone: "+447774333333", role: "MANICURIST", bio: "Gel polish and nail art specialist", active: true },
+  { name: "Sarah Nguyen", email: "sarah@nailbooking.com", phone: "+447****1111", role: "MANICURIST", bio: "Nail extension specialist with 5 years experience", avatar: "/images/gallery-1.jpg", active: true },
+  { name: "Emma Linh", email: "emma@nailbooking.com", phone: "+447****2222", role: "WAXING_SPECIALIST", bio: "Waxing and beauty treatment expert", avatar: "/images/gallery-2.jpg", active: true },
+  { name: "Lily Tran", email: "lily@nailbooking.com", phone: "+447****3333", role: "MANICURIST", bio: "Gel polish and nail art specialist", avatar: "/images/gallery-3.jpg", active: true },
 ];
+
+const servicesWithImages = services.map((service, index) => ({
+  ...service,
+  image: `/images/gallery-${(index % 10) + 1}.jpg`,
+}));
 
 async function main() {
   // 1. Create admin user
@@ -51,13 +56,18 @@ async function main() {
   console.log(`Admin user: ${admin.email}`);
 
   // 2. Seed services (skip if already exist to avoid duplicates)
-  for (const s of services) {
-    const existing = await prisma.service.findFirst({ where: { name: s.name, category: s.category } });
+  for (const s of servicesWithImages) {
+    const existing = await prisma.service.findFirst({ where: { name: s.name } });
     if (!existing) {
       await prisma.service.create({ data: s });
       console.log(`Created service: ${s.name}`);
     } else {
-      console.log(`Skipped service: ${s.name}`);
+      if (!existing.image) {
+        await prisma.service.update({ where: { id: existing.id }, data: { image: s.image } });
+        console.log(`Updated service image: ${s.name}`);
+      } else {
+        console.log(`Skipped service: ${s.name}`);
+      }
     }
   }
 
@@ -68,9 +78,21 @@ async function main() {
       await prisma.staff.create({ data: st });
       console.log(`Created staff: ${st.name}`);
     } else {
-      console.log(`Skipped staff: ${st.name}`);
+      if (!existing.avatar) {
+        await prisma.staff.update({ where: { id: existing.id }, data: { avatar: st.avatar } });
+        console.log(`Updated staff avatar: ${st.name}`);
+      } else {
+        console.log(`Skipped staff: ${st.name}`);
+      }
     }
   }
+
+  await prisma.promoCode.upsert({
+    where: { code: "NAIL20" },
+    update: { discountPercent: 20, active: true, name: "20% Welcome Discount" },
+    create: { code: "NAIL20", name: "20% Welcome Discount", discountPercent: 20, active: true, usageLimit: 500 },
+  });
+  console.log("Promo code ready: NAIL20");
 
   console.log("Seed complete!");
 }
