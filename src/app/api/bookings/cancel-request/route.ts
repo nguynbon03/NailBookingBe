@@ -66,15 +66,28 @@ export async function POST(req: NextRequest) {
       },
       include: bookingInclude,
     });
-    await tx.notification.create({
-      data: {
+    const notifications: any[] = [
+      {
         audience: "ADMIN",
+        staffId: booking.staffId || booking.requestedStaffId || null,
         bookingId: booking.id,
         type: "CUSTOMER_CANCEL_REQUEST",
         title: "Customer requested cancellation",
         message: `${booking.customerName} requested cancellation for ${reference}. Reason: ${reason}. Review in Admin Bookings before cancelling/refunding.`,
       },
-    });
+    ];
+    const staffTargets = Array.from(new Set([booking.staffId, booking.requestedStaffId].filter(Boolean).map(String)));
+    for (const staffId of staffTargets) {
+      notifications.push({
+        audience: "STAFF",
+        staffId,
+        bookingId: booking.id,
+        type: "STAFF_CUSTOMER_CANCEL_REQUEST",
+        title: "Customer requested cancellation",
+        message: `${booking.customerName} requested cancellation for ${reference}. The booking is still confirmed until admin reviews it. Reason: ${reason}.`,
+      });
+    }
+    await tx.notification.createMany({ data: notifications });
     return saved;
   });
 

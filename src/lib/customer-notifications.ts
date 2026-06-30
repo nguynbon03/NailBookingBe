@@ -19,7 +19,7 @@ type CustomerBooking = {
   services?: { service?: { name?: string | null } | null }[];
 };
 
-type CustomerEvent = "booking_created" | "booking_confirmed" | "booking_cancelled" | "booking_no_show" | "booking_email_verification" | "account_verification" | "payment_transfer_link";
+type CustomerEvent = "booking_created" | "booking_confirmed" | "booking_cancelled" | "booking_no_show" | "booking_email_verification" | "account_verification" | "payment_transfer_link" | "daily_revenue_report" | "monthly_revenue_report";
 
 const SHOP_NAME = process.env.SHOP_NAME || "The Nail Lounge @ Stokesley";
 const PUBLIC_BOOKING_URL = process.env.PUBLIC_BOOKING_URL || "https://bookingnail.overpowers.agency/my-bookings";

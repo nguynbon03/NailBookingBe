@@ -242,6 +242,60 @@ async function main() {
   `);
 
   await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "BankStatementEntry" (
+      "id" TEXT PRIMARY KEY,
+      "source" TEXT NOT NULL DEFAULT 'manual_statement',
+      "bankAccount" TEXT,
+      "transactionDate" TIMESTAMP(3) NOT NULL,
+      "postedAt" TIMESTAMP(3),
+      "description" TEXT NOT NULL,
+      "reference" TEXT,
+      "amount" DECIMAL(10,2) NOT NULL,
+      "currency" TEXT NOT NULL DEFAULT 'GBP',
+      "type" TEXT NOT NULL DEFAULT 'CREDIT',
+      "matchedBookingId" TEXT,
+      "matchedConfidence" DECIMAL(5,2),
+      "fingerprint" TEXT NOT NULL,
+      "raw" JSONB,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "BankStatementEntry_fingerprint_key" ON "BankStatementEntry" ("fingerprint");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "BankStatementEntry_transactionDate_idx" ON "BankStatementEntry" ("transactionDate");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "BankStatementEntry_reference_idx" ON "BankStatementEntry" ("reference");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "BankStatementEntry_matchedBookingId_idx" ON "BankStatementEntry" ("matchedBookingId");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "ReportDeliveryLog" (
+      "id" TEXT PRIMARY KEY,
+      "reportType" TEXT NOT NULL,
+      "period" TEXT NOT NULL,
+      "periodStart" TIMESTAMP(3) NOT NULL,
+      "periodEnd" TIMESTAMP(3) NOT NULL,
+      "channel" TEXT NOT NULL,
+      "recipient" TEXT NOT NULL,
+      "status" TEXT NOT NULL,
+      "provider" TEXT,
+      "providerMessageId" TEXT,
+      "error" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "sentAt" TIMESTAMP(3)
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "ReportDeliveryLog_report_period_channel_idx" ON "ReportDeliveryLog" ("reportType", "periodStart", "channel");
+  `);
+
+  await prisma.$executeRawUnsafe(`
     DO $$
     BEGIN
       IF NOT EXISTS (

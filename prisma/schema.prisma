@@ -190,6 +190,47 @@ model Revenue {
   createdAt       DateTime @default(now())
 }
 
+model BankStatementEntry {
+  id                String   @id @default(cuid())
+  source            String   @default("manual_statement")
+  bankAccount       String?
+  transactionDate   DateTime
+  postedAt          DateTime?
+  description       String
+  reference         String?
+  amount            Decimal  @db.Decimal(10, 2)
+  currency          String   @default("GBP")
+  type              String   @default("CREDIT")
+  matchedBookingId  String?
+  matchedConfidence Decimal? @db.Decimal(5, 2)
+  fingerprint       String   @unique
+  raw               Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([transactionDate])
+  @@index([reference])
+  @@index([matchedBookingId])
+}
+
+model ReportDeliveryLog {
+  id                String    @id @default(cuid())
+  reportType        String
+  period            String
+  periodStart       DateTime
+  periodEnd         DateTime
+  channel           String
+  recipient         String
+  status            String
+  provider          String?
+  providerMessageId String?
+  error             String?
+  createdAt         DateTime  @default(now())
+  sentAt            DateTime?
+
+  @@index([reportType, periodStart, channel])
+}
+
 model PromoCode {
   id              String    @id @default(cuid())
   code            String    @unique

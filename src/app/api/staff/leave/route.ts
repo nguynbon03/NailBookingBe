@@ -190,19 +190,36 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { id } = await req.json().catch(() => ({}));
+  const { id, hardDelete } = await req.json().catch(() => ({}));
   if (!id) return NextResponse.json({ error: "Leave request id is required" }, { status: 400 });
 
   const existing = await prisma.staffLeaveRequest.findUnique({ where: { id: String(id) }, include: { staff: true } });
   if (!existing) return NextResponse.json({ error: "Leave request not found" }, { status: 404 });
 
   const isOwner = existing.staff.email === authUser.email;
-  if (!isOwner && !isAdminRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const isAdmin = isAdminRole(authUser.role);
+  if (!isOwner && !isAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  if (isAdmin && (hardDelete !== false || !isOwner)) {
+    await prisma.$transaction(async (tx) => {
+      await tx.staffLeaveRequest.delete({ where: { id: String(id) } });
+      await tx.notification.create({
+        data: {
+          audience: "ADMIN",
+          staffId: existing.staffId,
+          type: "STAFF_LEAVE_DELETED",
+          title: "Leave request deleted",
+          message: `${authUser.name || "Manager"} deleted ${existing.staff.name}'s leave request from ${existing.startDate.toISOString().slice(0, 10)} to ${existing.endDate.toISOString().slice(0, 10)} to clean the admin list.`,
+        },
+      });
+    });
+    return NextResponse.json({ success: true, deleted: true, id: String(id) });
+  }
 
   const leaveRequest = await prisma.$transaction(async (tx) => {
     const updated = await tx.staffLeaveRequest.update({
       where: { id: String(id) },
-      data: { status: "CANCELLED", managerNote: isOwner ? "Cancelled by staff" : `Cancelled by ${authUser.name}` },
+      data: { status: "CANCELLED", managerNote: isOwner ? "Cancelled by staff" : `Cancelled by ${authUser.name || authUser.email}` },
       include: { staff: { select: { id: true, name: true, email: true, role: true } } },
     });
 
@@ -219,5 +236,5 @@ export async function DELETE(req: NextRequest) {
     return updated;
   });
 
-  return NextResponse.json({ leaveRequest: serializeLeave(leaveRequest) });
+  return NextResponse.json({ leaveRequest: serializeLeave(leaveRequest), deleted: false });
 }
