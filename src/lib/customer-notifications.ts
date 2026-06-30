@@ -32,6 +32,11 @@ function formatDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function money(value: unknown) {
+  const amount = Number(value || 0);
+  return `£${Number.isFinite(amount) ? amount.toFixed(2) : "0.00"}`;
+}
+
 function serviceSummary(booking: CustomerBooking) {
   return (booking.services || []).map((item) => item.service?.name).filter(Boolean).join(", ") || "your service";
 }
@@ -52,38 +57,77 @@ function firstUrl(value: string) {
 function renderEmailHtml(subject: string, message: string) {
   const url = firstUrl(message);
   const safeSubject = escapeHtml(subject);
+  const reference = message.match(/\bNL-[A-Z0-9]+\b/)?.[0] || "";
+  const when = message.match(/ on ([0-9]{4}-[0-9]{2}-[0-9]{2}) at ([0-9:]+)/);
+  const amount = message.match(/Amount: (£[0-9,.]+)/)?.[1] || "";
+  const isPayment = /secure payment link|transfer link|bank-transfer/i.test(subject + " " + message);
+  const isConfirmed = /confirmed/i.test(subject);
+  const isCancelled = /cancelled/i.test(subject);
+  const badge = isCancelled ? "Booking update" : isConfirmed ? "Confirmed booking" : isPayment ? "Secure payment link" : "Booking update";
+  const accent = isCancelled ? "#ef4444" : isConfirmed ? "#10b981" : "#ec4899";
+  const ctaLabel = isPayment ? "Open secure transfer link" : isConfirmed ? "View my booking" : "Open booking details";
+  const preheader = isPayment
+    ? "Your Nail Lounge booking is saved. Open the secure link within 3 minutes to lock a staff member."
+    : isConfirmed
+      ? "Your Nail Lounge booking has been confirmed."
+      : isCancelled
+        ? "Important update about your Nail Lounge booking."
+        : "Update about your Nail Lounge booking.";
+
   const paragraphs = message
+    .replace(url, "")
     .split(/(?<=\.)\s+/)
     .map((part) => part.trim())
     .filter(Boolean)
-    .map((part) => `<p style="margin:0 0 12px;color:#475569;font-size:15px;line-height:1.65;">${escapeHtml(part)}</p>`)
+    .map((part) => `<p style="margin:0 0 13px;color:#475569;font-size:15px;line-height:1.7;">${escapeHtml(part)}</p>`)
     .join("");
-  const cta = url
-    ? `<tr><td style="padding:8px 28px 28px;text-align:center;"><a href="${escapeHtml(url)}" style="display:inline-block;background:linear-gradient(135deg,#ec4899,#e11d48);color:#ffffff;text-decoration:none;font-weight:800;border-radius:999px;padding:15px 26px;box-shadow:0 14px 30px rgba(236,72,153,.28);">Open secure booking link</a><p style="margin:14px 0 0;color:#94a3b8;font-size:12px;word-break:break-all;">${escapeHtml(url)}</p></td></tr>`
+
+  const detailItems = [
+    reference ? ["Reference", reference] : null,
+    when ? ["Date", when[1]] : null,
+    when ? ["Time", when[2]] : null,
+    amount ? ["Amount", amount] : null,
+  ].filter(Boolean) as string[][];
+
+  const details = detailItems.length
+    ? `<tr><td style="padding:0 28px 22px;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:0 10px;">${detailItems.map(([label, value]) => `<tr><td style="width:38%;padding:13px 14px;background:#fff7fb;border:1px solid #fbcfe8;border-right:0;border-radius:16px 0 0 16px;color:#be185d;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;">${escapeHtml(label)}</td><td style="padding:13px 14px;background:#ffffff;border:1px solid #fbcfe8;border-left:0;border-radius:0 16px 16px 0;color:#0f172a;font-size:15px;font-weight:900;word-break:break-word;">${escapeHtml(value)}</td></tr>`).join("")}</table></td></tr>`
     : "";
-  return `<!doctype html><html><body style="margin:0;background:#fff1f6;font-family:Inter,Arial,sans-serif;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#fff1f6;padding:28px 12px;">
+
+  const paymentNote = isPayment
+    ? `<tr><td style="padding:0 28px 22px;"><div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:20px;padding:16px;color:#9a3412;font-size:13px;line-height:1.6;"><strong>Important:</strong> opening the link locks one available staff member for 3 minutes. Please use the reference above on your bank transfer. The appointment appears on the staff schedule only after admin confirms payment.</div></td></tr>`
+    : "";
+
+  const cta = url
+    ? `<tr><td style="padding:4px 28px 28px;text-align:center;"><a href="${escapeHtml(url)}" style="display:inline-block;background:linear-gradient(135deg,#ec4899,#e11d48);color:#ffffff;text-decoration:none;font-weight:900;border-radius:999px;padding:16px 28px;box-shadow:0 16px 34px rgba(236,72,153,.30);font-size:15px;">${ctaLabel}</a><p style="margin:16px 0 0;color:#94a3b8;font-size:12px;line-height:1.5;word-break:break-all;">If the button does not work, copy this link:<br />${escapeHtml(url)}</p></td></tr>`
+    : "";
+
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1" /><meta http-equiv="Content-Type" content="text/html; charset=utf-8" /></head><body style="margin:0;background:#fff1f6;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(preheader)}</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:linear-gradient(180deg,#fff1f6,#ffffff);padding:30px 12px;">
     <tr><td align="center">
-      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border-radius:28px;overflow:hidden;border:1px solid #fbcfe8;box-shadow:0 24px 70px rgba(236,72,153,.18);">
-        <tr><td style="background:linear-gradient(135deg,#f9a8d4,#e11d48);padding:34px 28px;text-align:center;color:white;">
-          <div style="display:inline-flex;width:62px;height:62px;border-radius:22px;background:rgba(255,255,255,.22);align-items:center;justify-content:center;font-size:34px;margin-bottom:12px;">✿</div>
-          <div style="font-size:28px;font-weight:900;letter-spacing:-.04em;">Nail Lounge</div>
-          <div style="font-size:12px;font-weight:800;letter-spacing:.45em;text-transform:uppercase;opacity:.9;">Stokesley</div>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border-radius:30px;overflow:hidden;border:1px solid #fbcfe8;box-shadow:0 24px 70px rgba(236,72,153,.18);">
+        <tr><td style="background:linear-gradient(135deg,#f9a8d4,#e11d48);padding:36px 28px;text-align:center;color:white;">
+          <div style="display:inline-flex;width:66px;height:66px;border-radius:24px;background:rgba(255,255,255,.22);align-items:center;justify-content:center;font-size:36px;margin-bottom:14px;">✿</div>
+          <div style="font-size:30px;font-weight:950;letter-spacing:-.04em;line-height:1;">Nail Lounge</div>
+          <div style="font-size:12px;font-weight:900;letter-spacing:.45em;text-transform:uppercase;opacity:.92;margin-top:8px;">Stokesley</div>
         </td></tr>
         <tr><td style="padding:28px 28px 8px;">
-          <h1 style="margin:0 0 14px;color:#0f172a;font-size:24px;line-height:1.2;">${safeSubject}</h1>
+          <div style="display:inline-block;background:${accent}1A;color:${accent};border:1px solid ${accent}40;border-radius:999px;padding:7px 12px;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;">${escapeHtml(badge)}</div>
+          <h1 style="margin:0 0 14px;color:#0f172a;font-size:25px;line-height:1.2;letter-spacing:-.03em;">${safeSubject}</h1>
           ${paragraphs}
         </td></tr>
+        ${details}
+        ${paymentNote}
         ${cta}
-        <tr><td style="padding:18px 28px;background:#f8fafc;color:#64748b;font-size:12px;line-height:1.6;">
-          The Nail Lounge @ Stokesley · 33 High St, Stokesley, TS9 5AD<br />Need help? Call +44 7774 292572 or reply to this email.
+        <tr><td style="padding:20px 28px;background:#f8fafc;color:#64748b;font-size:12px;line-height:1.65;">
+          <strong style="color:#0f172a;">The Nail Lounge @ Stokesley</strong><br />33 High St, Stokesley, TS9 5AD<br />Need help? Call <a href="tel:+447774292572" style="color:#be185d;text-decoration:none;font-weight:800;">+44 7774 292572</a> or reply to this email.
         </td></tr>
       </table>
+      <p style="max-width:640px;margin:14px auto 0;color:#94a3b8;font-size:11px;line-height:1.5;text-align:center;">You received this email because a booking was created or updated with your verified account at The Nail Lounge @ Stokesley.</p>
     </td></tr>
   </table>
   </body></html>`;
 }
-
 function composeCustomerMessage(booking: CustomerBooking, event: CustomerEvent) {
   const ref = bookingReference(booking.id);
   const service = serviceSummary(booking);
@@ -93,14 +137,14 @@ function composeCustomerMessage(booking: CustomerBooking, event: CustomerEvent) 
     const transferUrl = (booking as any).paymentTransferUrl || (booking as any).emailVerificationUrl || PUBLIC_BOOKING_URL;
     return {
       subject: `${SHOP_NAME}: secure payment link for your booking (${ref})`,
-      message: `Hi ${booking.customerName}, your account email is verified and your booking request for ${service} on ${when} has been received. Reference: ${ref}. Click this secure transfer link within 3 minutes to lock one available staff member for this slot: ${transferUrl}. Use ${ref} as the bank-transfer reference. The appointment will only appear on the staff schedule after the shop/admin confirms the bank transfer. If the 3-minute lock expires, please reopen the booking flow or contact the shop before transferring.`,
+      message: `Hi ${booking.customerName}, your account email is verified and your booking request for ${service} on ${when} has been received. Reference: ${ref}. Amount: ${money(booking.totalPrice)}. Click this secure transfer link within 3 minutes to lock one available staff member for this slot: ${transferUrl}. Use ${ref} as the bank-transfer reference. The appointment will only appear on the staff schedule after the shop/admin confirms the bank transfer. If the 3-minute lock expires, please reopen the booking flow or contact the shop before transferring.`,
     };
   }
 
   if (event === "booking_confirmed") {
     return {
       subject: `${SHOP_NAME}: booking confirmed (${ref})`,
-      message: `Hi ${booking.customerName}, your booking for ${service} on ${when} is confirmed. Reference: ${ref}. We look forward to seeing you at ${SHOP_NAME}.`,
+      message: `Hi ${booking.customerName}, your booking for ${service} on ${when} is confirmed. Reference: ${ref}. Amount: ${money(booking.totalPrice)}. We look forward to seeing you at ${SHOP_NAME}.`,
     };
   }
 
@@ -108,13 +152,13 @@ function composeCustomerMessage(booking: CustomerBooking, event: CustomerEvent) 
     const reason = booking.cancellationReason || "No Reason";
     return {
       subject: `${SHOP_NAME}: booking cancelled (${ref})`,
-      message: `Hi ${booking.customerName}, your booking for ${service} on ${when} has been cancelled by the shop. Reference: ${ref}. Reason for cancellation: ${reason}. Please contact the shop if you want to rebook.`,
+      message: `Hi ${booking.customerName}, your booking for ${service} on ${when} has been cancelled by the shop. Reference: ${ref}. Amount: ${money(booking.totalPrice)}. Reason for cancellation: ${reason}. Please contact the shop if you want to rebook.`,
     };
   }
 
   return {
     subject: `${SHOP_NAME}: booking marked no-show (${ref})`,
-    message: `Hi ${booking.customerName}, your booking for ${service} on ${when} was marked as no-show. Reference: ${ref}. Please contact the shop if this is incorrect.`,
+    message: `Hi ${booking.customerName}, your booking for ${service} on ${when} was marked as no-show. Reference: ${ref}. Amount: ${money(booking.totalPrice)}. Please contact the shop if this is incorrect.`,
   };
 }
 
