@@ -63,6 +63,8 @@ model Booking {
   time           String
   status         BookingStatus @default(PENDING)
   totalPrice     Decimal       @db.Decimal(10, 2)
+  discount       Decimal?      @db.Decimal(10, 2)
+  promoCode      String?
   notes          String?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
@@ -88,10 +90,11 @@ enum BookingStatus {
 }
 
 model Revenue {
-  id        String   @id @default(cuid())
-  date      DateTime
-  amount    Decimal  @db.Decimal(10, 2)
-  category  String
-  bookingId String?
-  createdAt DateTime @default(now())
+  id              String   @id @default(cuid())
+  date            DateTime
+  amount          Decimal  @db.Decimal(10, 2)
+  category        String
+  discountApplied Boolean  @default(false)
+  bookingId       String?
+  createdAt       DateTime @default(now())
 }
