@@ -24,4 +24,4 @@ COPY --from=base /app/tsconfig.json ./
 COPY --from=base /app/next.config.ts ./
 COPY --from=base /app/prisma.config.ts ./
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma db push || echo 'WARN: prisma db push failed; starting app without destructive reset'; npx tsx prisma/seed.ts || echo 'WARN: seed failed; preserving existing data and starting app'; node .next/standalone/server.js"]
+CMD ["sh", "-c", "npx tsx prisma/ensure-schema.ts || echo 'WARN: non-destructive schema ensure failed'; npx prisma db push || echo 'WARN: prisma db push failed; starting app without destructive reset'; npx tsx prisma/seed.ts || echo 'WARN: seed failed; preserving existing data and starting app'; node .next/standalone/server.js"]
