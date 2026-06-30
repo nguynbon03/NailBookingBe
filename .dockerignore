@@ -1,0 +1,8 @@
+.git
+node_modules
+.next
+.vercel
+.env*
+npm-debug.log*
+Dockerfile.*
+*.local

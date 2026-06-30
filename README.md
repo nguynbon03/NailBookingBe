@@ -5,7 +5,7 @@ Backend API cho Nail Booking System.
 ## Tech Stack
 - Next.js 16 API Routes
 - Prisma ORM + PostgreSQL
-- Redis (slot locking)
+- PostgreSQL-backed booking slot checks
 - JWT Authentication
 
 ## API Routes
@@ -26,6 +26,5 @@ docker-compose up -d
 | Variable | Description |
 |----------|-------------|
 | DATABASE_URL | PostgreSQL connection |
-| REDIS_URL | Redis connection |
 | NEXTAUTH_SECRET | JWT secret |
 | NEXTAUTH_URL | Backend URL |

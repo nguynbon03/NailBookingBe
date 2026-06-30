@@ -3,6 +3,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
+ARG DATABASE_URL=postgresql://postgres@localhost:5432/postgres
+ARG NEXTAUTH_URL=http://localhost:3000
+ENV DATABASE_URL=$DATABASE_URL
+ENV NEXTAUTH_URL=$NEXTAUTH_URL
 RUN npx prisma generate
 RUN npm run build
 
@@ -18,6 +22,6 @@ COPY --from=base /app/prisma ./prisma
 COPY --from=base /app/src ./src
 COPY --from=base /app/tsconfig.json ./
 COPY --from=base /app/next.config.ts ./
-COPY --from=base /app/nixpacks.toml ./
+COPY --from=base /app/prisma.config.ts ./
 EXPOSE 3000
-CMD ["npm", "start"]
+CMD ["sh", "-c", "npx prisma db push && npx tsx prisma/seed.ts && node .next/standalone/server.js"]

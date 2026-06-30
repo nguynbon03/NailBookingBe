@@ -44,9 +44,9 @@ async function main() {
   // 1. Create admin user
   const adminPassword = hashSync("admin123", 10);
   const admin = await prisma.user.upsert({
-    where: { email: "admin@nailbooking.com" },
+    where: { email: "admin" },
     update: {},
-    create: { email: "admin@nailbooking.com", password: adminPassword, name: "Admin", role: "ADMIN" },
+    create: { email: "admin", password: adminPassword, name: "Admin", role: "ADMIN" },
   });
   console.log(`Admin user: ${admin.email}`);
 
