@@ -144,7 +144,7 @@ function composeCustomerMessage(booking: CustomerBooking, event: CustomerEvent) 
     const transferUrl = (booking as any).paymentTransferUrl || (booking as any).emailVerificationUrl || PUBLIC_BOOKING_URL;
     return {
       subject: `${SHOP_NAME}: deposit link for your booking (${ref})`,
-      message: `Hi ${booking.customerName}, your booking request for ${service} on ${when} has been received. Reference: ${ref}. Amount: ${money(booking.totalPrice)}. To protect the shop from spam/no-show bookings, this slot requires a deposit before staff assignment. Open this secure deposit link: ${transferUrl}. Use ${ref} as the bank-transfer reference. The appointment will appear on the staff schedule after the shop/admin confirms the deposit/payment.`,
+      message: `Hi ${booking.customerName}, your booking request for ${service} on ${when} has been received. Reference: ${ref}. Amount: ${money(booking.totalPrice)}. To protect the shop from spam/no-show bookings, this slot requires a secure payment click. Open this secure link: ${transferUrl}. Once opened, the system records the payment automatically. If staff is available, the booking is confirmed immediately; if not, the shop will contact you to move the time, find replacement staff, or arrange a refund.`,
     };
   }
 

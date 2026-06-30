@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
       requestedDate,
       totalPrice,
     });
-    const transfer = protection.depositRequired ? createVerificationToken(30) : null;
+    const transfer = protection.depositRequired ? createVerificationToken(7 * 24 * 60) : null;
     const transferUrl = transfer ? paymentTransferUrl(transfer.token) : null;
 
     const booking = await prisma.$transaction(async (tx) => {
