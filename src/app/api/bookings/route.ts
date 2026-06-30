@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { BookingStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser, isAdminRole } from "@/lib/auth";
+import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from "@/lib/booking-workflow";
+import { hasAnyAvailableStaff, isStaffAvailableAndFree } from "@/lib/availability";
+import { notifyBookingCreated, notifyBookingStatusChanged } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -8,18 +12,6 @@ export const runtime = "nodejs";
 function normalizeServiceInputs(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return Array.from(new Set(value.map((v) => String(v || "").trim()).filter(Boolean)));
-}
-
-function serializeBooking(booking: any) {
-  return {
-    ...booking,
-    totalPrice: Number(booking.totalPrice),
-    discount: booking.discount == null ? null : Number(booking.discount),
-    services: booking.services?.map((item: any) => ({
-      ...item,
-      service: item.service ? { ...item.service, price: Number(item.service.price) } : item.service,
-    })) || [],
-  };
 }
 
 async function getActivePromo(code: unknown) {
@@ -39,15 +31,7 @@ export async function POST(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
     const body = await req.json();
-    const {
-      customerName,
-      customerPhone,
-      customerEmail,
-      serviceIds,
-      staffId,
-      promoCode,
-      notes,
-    } = body;
+    const { customerName, customerPhone, customerEmail, serviceIds, staffId, promoCode, notes } = body;
     const date = body.date;
     const time = body.time;
 
@@ -64,12 +48,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "At least one service is required" }, { status: 400 });
     }
 
+    if (staffId) {
+      const staff = await prisma.staff.findFirst({ where: { id: String(staffId), active: true } });
+      if (!staff) return NextResponse.json({ error: "Selected staff was not found" }, { status: 400 });
+    }
+
     const requestedDate = new Date(date);
     const existingBooking = await prisma.booking.findFirst({
       where: {
         date: requestedDate,
         time,
-        ...(staffId ? { staffId } : {}),
+        ...(staffId ? { staffId: String(staffId) } : {}),
         status: { notIn: ["CANCELLED", "NO_SHOW"] },
       },
     });
@@ -88,7 +77,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Selected service was not found" }, { status: 400 });
     }
 
-    let totalPrice = services.reduce((sum: number, s: { price: any }) => sum + Number(s.price), 0);
+    const totalDuration = services.reduce((sum: number, s: { duration: number }) => sum + Number(s.duration || 0), 0) || 30;
+
+    if (staffId) {
+      const ok = await isStaffAvailableAndFree(prisma, String(staffId), requestedDate, time, totalDuration);
+      if (!ok) return NextResponse.json({ error: "Selected staff is not available at this time" }, { status: 409 });
+    } else {
+      const ok = await hasAnyAvailableStaff(prisma, requestedDate, time, totalDuration);
+      if (!ok) return NextResponse.json({ error: "No staff is available at this time" }, { status: 409 });
+    }
+
+    let totalPrice = services.reduce((sum: number, s: { price: unknown }) => sum + Number(s.price), 0);
     let discountAmount = 0;
     let appliedPromoCode: string | null = null;
     const activePromo = await getActivePromo(promoCode);
@@ -114,24 +113,17 @@ export async function POST(req: NextRequest) {
           customerEmail: email || null,
           date: requestedDate,
           time,
-          staffId: staffId || null,
+          staffId: staffId ? String(staffId) : null,
+          status: "PENDING",
           totalPrice,
           discount: discountAmount > 0 ? discountAmount : null,
           promoCode: appliedPromoCode,
           notes: notes ? String(notes) : null,
           services: { create: services.map((service) => ({ serviceId: service.id })) },
         },
-        include: { services: { include: { service: true } }, staff: true, user: true },
+        include: bookingInclude,
       });
-
-      await tx.revenue.create({
-        data: { date: requestedDate, amount: totalPrice, category: "SERVICE", discountApplied: discountAmount > 0, bookingId: created.id },
-      });
-
-      if (activePromo) {
-        await tx.promoCode.update({ where: { id: activePromo.id }, data: { usedCount: { increment: 1 } } });
-      }
-
+      await notifyBookingCreated(tx, created);
       return created;
     });
 
@@ -150,13 +142,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (!mine && authUser && !isAdminRole(authUser.role)) {
+  if (!mine && (!authUser || !isAdminRole(authUser.role))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const bookings = await prisma.booking.findMany({
     where: mine ? { userId: authUser!.id } : undefined,
-    include: { services: { include: { service: true } }, staff: true, user: { select: { id: true, email: true, name: true, role: true } } },
+    include: bookingInclude,
     orderBy: { createdAt: "desc" },
   });
   return NextResponse.json({ bookings: bookings.map(serializeBooking) });
@@ -168,16 +160,18 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { id, status } = await req.json().catch(() => ({}));
+  const { id, status, staffId } = await req.json().catch(() => ({}));
   const allowed = new Set(["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED", "NO_SHOW"]);
   if (!id || !allowed.has(status)) {
     return NextResponse.json({ error: "Invalid booking status" }, { status: 400 });
   }
 
-  const booking = await prisma.booking.update({
-    where: { id },
-    data: { status },
-    include: { services: { include: { service: true } }, staff: true, user: { select: { id: true, email: true, name: true, role: true } } },
+  const booking = await prisma.$transaction(async (tx) => {
+    const extraData: Record<string, unknown> = {};
+    if (staffId !== undefined) extraData.staffId = staffId || null;
+    const updated = await updateBookingStatusWithRevenue(tx, String(id), status as BookingStatus, extraData);
+    await notifyBookingStatusChanged(tx, updated, authUser.name);
+    return updated;
   });
 
   return NextResponse.json({ booking: serializeBooking(booking) });

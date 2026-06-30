@@ -74,16 +74,26 @@ async function main() {
   // 3. Seed staff
   for (const st of staff) {
     const existing = await prisma.staff.findFirst({ where: { email: st.email } });
-    if (!existing) {
-      await prisma.staff.create({ data: st });
-      console.log(`Created staff: ${st.name}`);
-    } else {
-      if (!existing.avatar) {
-        await prisma.staff.update({ where: { id: existing.id }, data: { avatar: st.avatar } });
-        console.log(`Updated staff avatar: ${st.name}`);
-      } else {
-        console.log(`Skipped staff: ${st.name}`);
+    const staffRecord = !existing
+      ? await prisma.staff.create({ data: st })
+      : await prisma.staff.update({ where: { id: existing.id }, data: { avatar: existing.avatar || st.avatar, active: existing.active } });
+    await prisma.user.upsert({
+      where: { email: st.email },
+      update: { name: st.name, phone: st.phone, role: "STAFF" },
+      create: { email: st.email, password: hashSync("staff123", 10), name: st.name, phone: st.phone, role: "STAFF" },
+    });
+    for (const dayOfWeek of [1, 2, 3, 4, 5, 6]) {
+      const availability = await prisma.staffAvailability.findFirst({ where: { staffId: staffRecord.id, dayOfWeek, date: null } });
+      if (!availability) {
+        await prisma.staffAvailability.create({ data: { staffId: staffRecord.id, dayOfWeek, startTime: "09:00", endTime: "18:00", active: true } });
       }
+    }
+    if (!existing) {
+      console.log(`Created staff: ${st.name}`);
+    } else if (!existing.avatar) {
+      console.log(`Updated staff avatar: ${st.name}`);
+    } else {
+      console.log(`Skipped staff: ${st.name}`);
     }
   }
 

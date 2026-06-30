@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { BookingStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -39,29 +40,35 @@ function buildSeries(keys: string[], totals: Map<string, number>) {
 export async function GET() {
   const now = new Date();
   const start = new Date(Date.UTC(now.getUTCFullYear() - 3, 0, 1));
+  const revenueStatuses: BookingStatus[] = ["CONFIRMED", "COMPLETED"];
 
-  const [totalUsers, customers, adminUsers, bookings, revenue, services, activeServices, activePromoCodes, promoCodes, revenues] = await Promise.all([
+  const [totalUsers, customers, adminUsers, bookings, confirmedBookings, services, activeServices, activePromoCodes, promoCodes] = await Promise.all([
     prisma.user.count(),
     prisma.user.count({ where: { role: "CUSTOMER" } }),
     prisma.user.count({ where: { role: { in: ["ADMIN", "MANAGER", "STAFF"] } } }),
     prisma.booking.count(),
-    prisma.revenue.aggregate({ _sum: { amount: true } }),
+    prisma.booking.findMany({
+      where: { status: { in: revenueStatuses }, date: { gte: start } },
+      select: { id: true, date: true, totalPrice: true, discount: true, promoCode: true, status: true },
+      orderBy: { date: "asc" },
+    }),
     prisma.service.count(),
     prisma.service.count({ where: { active: true } }),
     prisma.promoCode.count({ where: { active: true } }),
     prisma.promoCode.findMany({ orderBy: { usedCount: "desc" }, take: 8 }),
-    prisma.revenue.findMany({ where: { date: { gte: start } }, orderBy: { date: "asc" } }),
   ]);
 
   const dailyTotals = new Map<string, number>();
   const monthlyTotals = new Map<string, number>();
   const yearlyTotals = new Map<string, number>();
+  let revenue = 0;
 
-  for (const item of revenues) {
-    const amount = Number(item.amount);
-    dailyTotals.set(dateKey(item.date), (dailyTotals.get(dateKey(item.date)) || 0) + amount);
-    monthlyTotals.set(monthKey(item.date), (monthlyTotals.get(monthKey(item.date)) || 0) + amount);
-    yearlyTotals.set(yearKey(item.date), (yearlyTotals.get(yearKey(item.date)) || 0) + amount);
+  for (const booking of confirmedBookings) {
+    const amount = Number(booking.totalPrice);
+    revenue += amount;
+    dailyTotals.set(dateKey(booking.date), (dailyTotals.get(dateKey(booking.date)) || 0) + amount);
+    monthlyTotals.set(monthKey(booking.date), (monthlyTotals.get(monthKey(booking.date)) || 0) + amount);
+    yearlyTotals.set(yearKey(booking.date), (yearlyTotals.get(yearKey(booking.date)) || 0) + amount);
   }
 
   const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -76,7 +83,9 @@ export async function GET() {
       customers,
       adminUsers,
       bookings,
-      revenue: money(revenue._sum.amount),
+      confirmedBookings: confirmedBookings.length,
+      pendingBookings: await prisma.booking.count({ where: { status: "PENDING" } }),
+      revenue: money(revenue),
       services,
       activeServices,
       activePromoCodes,

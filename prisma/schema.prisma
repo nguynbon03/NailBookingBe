@@ -49,8 +49,34 @@ model Staff {
   bio       String?
   avatar    String?
   active    Boolean  @default(true)
+  bookings     Booking[]
+  availability StaffAvailability[]
+}
+
+model StaffAvailability {
+  id        String   @id @default(cuid())
+  staffId   String
+  dayOfWeek Int?
+  date      DateTime?
+  startTime String
+  endTime   String
+  active    Boolean  @default(true)
   createdAt DateTime @default(now())
-  bookings  Booking[]
+  updatedAt DateTime @updatedAt
+  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  audience  String
+  userId    String?
+  staffId   String?
+  bookingId String?
+  type      String
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
 }
 
 model Booking {
