@@ -38,10 +38,10 @@ export async function GET(req: NextRequest) {
 
   const searchParams = req.nextUrl.searchParams;
   const scope = searchParams.get("scope") || "dashboard";
-  const upcomingStatuses: BookingStatus[] = ["PENDING", "CONFIRMED"];
+  const upcomingStatuses: BookingStatus[] = ["CONFIRMED"];
 
   const availableWhere = {
-    status: "PENDING" as BookingStatus,
+    status: "CONFIRMED" as BookingStatus,
     staffId: null,
   };
 
@@ -113,6 +113,9 @@ export async function PUT(req: NextRequest) {
   const extraData: Record<string, unknown> = {};
 
   if (action === "claim" || action === "confirm") {
+    if (authUser.role === "STAFF" && existing.status !== "CONFIRMED") {
+      return NextResponse.json({ error: "Admin must confirm deposit before staff can claim this booking" }, { status: 403 });
+    }
     if (staffProfile) {
       if (existing.staffId && existing.staffId !== staffProfile.id && !isAdminLike) {
         return NextResponse.json({ error: "This booking is already assigned to another staff member" }, { status: 409 });

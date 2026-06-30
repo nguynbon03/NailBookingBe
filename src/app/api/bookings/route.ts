@@ -27,6 +27,27 @@ async function getActivePromo(code: unknown) {
   return promoCode;
 }
 
+function isGmailAddress(email: string) {
+  return /^[A-Z0-9._%+-]+@gmail\.com$/i.test(email.trim());
+}
+
+function bookingReference(id: string) {
+  return `NL-${id.slice(-8).toUpperCase()}`;
+}
+
+function buildPaymentInfo(booking: { id: string; totalPrice: unknown }) {
+  const configured = Number(process.env.BOOKING_DEPOSIT_AMOUNT || "10");
+  const total = Number(booking.totalPrice || 0);
+  const depositAmount = Math.max(1, Math.min(Number.isFinite(configured) ? configured : 10, total || configured || 10));
+  return {
+    status: "AWAITING_PAYMENT",
+    currency: "GBP",
+    depositAmount,
+    reference: bookingReference(booking.id),
+    instructions: "Please pay the deposit with this reference. Admin will confirm the booking after payment is received.",
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const authUser = await getAuthUser(req);
@@ -39,8 +60,12 @@ export async function POST(req: NextRequest) {
     const phone = String(customerPhone || authUser?.phone || "").trim();
     const email = String(customerEmail || authUser?.email || "").trim();
 
-    if (!name || !phone || !date || !time) {
+    if (!name || !phone || !email || !date || !time) {
       return NextResponse.json({ error: "Missing required booking fields" }, { status: 400 });
+    }
+
+    if (!isGmailAddress(email)) {
+      return NextResponse.json({ error: "Please use a real Gmail address to book online" }, { status: 400 });
     }
 
     const serviceKeys = normalizeServiceInputs(serviceIds);
@@ -127,7 +152,7 @@ export async function POST(req: NextRequest) {
       return created;
     });
 
-    return NextResponse.json({ booking: serializeBooking(booking) });
+    return NextResponse.json({ booking: serializeBooking(booking), payment: buildPaymentInfo(booking) });
   } catch (e) {
     return NextResponse.json({ error: "Booking failed" }, { status: 500 });
   }
