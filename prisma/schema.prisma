@@ -55,6 +55,23 @@ model Staff {
   active    Boolean  @default(true)
   bookings     Booking[]
   availability StaffAvailability[]
+  leaveRequests StaffLeaveRequest[]
+}
+
+model StaffLeaveRequest {
+  id          String   @id @default(cuid())
+  staffId     String
+  startDate   DateTime
+  endDate     DateTime
+  daysCount   Int
+  reason      String
+  status      String   @default("PENDING")
+  managerNote String?
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  staff       Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
 }
 
 model StaffAvailability {

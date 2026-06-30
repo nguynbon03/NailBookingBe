@@ -37,6 +37,17 @@ export async function notifyBookingStatusChanged(
     },
   ];
 
+  if (booking.status === "CONFIRMED" && !booking.staffId) {
+    data.push({
+      audience: "STAFF",
+      staffId: null,
+      bookingId: booking.id,
+      type: "PAID_JOB_AVAILABLE",
+      title: "New paid job available",
+      message: `${booking.customerName} paid for ${booking.date.toISOString().slice(0, 10)} at ${booking.time}. Open Staff Portal and accept the job if you can take it.`,
+    });
+  }
+
   if (booking.staffId) {
     data.push({
       audience: "STAFF",

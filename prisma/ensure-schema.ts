@@ -18,6 +18,23 @@ async function main() {
   `);
 
   await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "StaffLeaveRequest" (
+      "id" TEXT PRIMARY KEY,
+      "staffId" TEXT NOT NULL,
+      "startDate" TIMESTAMP(3) NOT NULL,
+      "endDate" TIMESTAMP(3) NOT NULL,
+      "daysCount" INTEGER NOT NULL,
+      "reason" TEXT NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'PENDING',
+      "managerNote" TEXT,
+      "reviewedBy" TEXT,
+      "reviewedAt" TIMESTAMP(3),
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "Notification" (
       "id" TEXT PRIMARY KEY,
       "audience" TEXT NOT NULL,
@@ -105,6 +122,12 @@ async function main() {
     CREATE INDEX IF NOT EXISTS "StaffAvailability_date_day_idx" ON "StaffAvailability" ("date", "dayOfWeek");
   `);
   await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "StaffLeaveRequest_staff_status_idx" ON "StaffLeaveRequest" ("staffId", "status");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "StaffLeaveRequest_dates_idx" ON "StaffLeaveRequest" ("startDate", "endDate");
+  `);
+  await prisma.$executeRawUnsafe(`
     CREATE INDEX IF NOT EXISTS "Notification_audience_read_idx" ON "Notification" ("audience", "read");
   `);
   await prisma.$executeRawUnsafe(`
@@ -125,6 +148,19 @@ async function main() {
       ) THEN
         ALTER TABLE "StaffAvailability"
         ADD CONSTRAINT "StaffAvailability_staffId_fkey"
+        FOREIGN KEY ("staffId") REFERENCES "Staff"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+      END IF;
+    END $$;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'StaffLeaveRequest_staffId_fkey'
+      ) THEN
+        ALTER TABLE "StaffLeaveRequest"
+        ADD CONSTRAINT "StaffLeaveRequest_staffId_fkey"
         FOREIGN KEY ("staffId") REFERENCES "Staff"("id") ON DELETE CASCADE ON UPDATE CASCADE;
       END IF;
     END $$;

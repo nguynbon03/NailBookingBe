@@ -67,6 +67,22 @@ async function staffHasBookingAt(tx: PrismaTx, staffId: string, date: Date, time
   return bookings.some((booking: any) => overlaps(requestedStart, duration, timeToMinutes(booking.time), bookingDuration(booking)));
 }
 
+async function staffHasApprovedLeave(tx: PrismaTx, staffId: string, date: Date) {
+  const leaveModel = (tx as any).staffLeaveRequest;
+  if (!leaveModel) return false;
+  const requestedDate = dateOnly(date);
+  const leave = await leaveModel.findFirst({
+    where: {
+      staffId,
+      status: "APPROVED",
+      startDate: { lte: requestedDate },
+      endDate: { gte: requestedDate },
+    },
+    select: { id: true },
+  });
+  return Boolean(leave);
+}
+
 async function unassignedBlockingAt(tx: PrismaTx, date: Date, time: string, duration = 30) {
   const requestedStart = timeToMinutes(time);
   const bookings = await tx.booking.findMany({
@@ -84,6 +100,7 @@ export async function isStaffAvailableAndFree(tx: PrismaTx, staffId: string, dat
   const date = dateOnly(dateInput);
   const staff = await tx.staff.findFirst({ where: { id: staffId, active: true }, select: { id: true } });
   if (!staff) return false;
+  if (await staffHasApprovedLeave(tx, staffId, date)) return false;
 
   const start = timeToMinutes(time);
   const end = start + duration;
