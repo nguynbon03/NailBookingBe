@@ -59,7 +59,7 @@ function composeCustomerMessage(booking: CustomerBooking, event: CustomerEvent) 
     const reason = booking.cancellationReason || "No Reason";
     return {
       subject: `${SHOP_NAME}: booking cancelled (${ref})`,
-      message: `Hi ${booking.customerName}, your booking for ${service} on ${when} has been cancelled by the shop/staff. Reference: ${ref}. Reason for cancellation: ${reason}. Please contact the shop if you want to rebook.`,
+      message: `Hi ${booking.customerName}, your booking for ${service} on ${when} has been cancelled by the shop. Reference: ${ref}. Reason for cancellation: ${reason}. Please contact the shop if you want to rebook.`,
     };
   }
 

@@ -192,9 +192,19 @@ export async function GET(req: NextRequest) {
   }
 
   const bookings = await prisma.booking.findMany({
-    where: mine ? { userId: authUser!.id } : undefined,
+    where: {
+      ...(mine ? { userId: authUser!.id } : {}),
+      ...(searchParams.get("includeArchived") === "1" ? {} : { archivedAt: null }),
+      ...(searchParams.get("date") ? {
+        date: {
+          gte: new Date(`${searchParams.get("date")}T00:00:00.000Z`),
+          lt: new Date(`${searchParams.get("date")}T23:59:59.999Z`),
+        },
+      } : {}),
+      ...(searchParams.get("status") ? { status: searchParams.get("status") as BookingStatus } : {}),
+    },
     include: bookingInclude,
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ date: "asc" }, { time: "asc" }, { createdAt: "desc" }],
   });
   return NextResponse.json({ bookings: bookings.map(serializeBooking) });
 }
@@ -211,15 +221,24 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Invalid booking status" }, { status: 400 });
   }
 
-  const target = await prisma.booking.findUnique({ where: { id: String(id) }, select: { id: true, status: true, emailVerifiedAt: true } });
+  const target = await prisma.booking.findUnique({ where: { id: String(id) }, select: { id: true, status: true, emailVerifiedAt: true, paymentConfirmedAt: true } });
   if (!target) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
   if (status === "CONFIRMED" && !target.emailVerifiedAt) {
-    return NextResponse.json({ error: "Customer email is not verified yet. Ask the customer to click the verification email before confirming." }, { status: 409 });
+    return NextResponse.json({ error: "Customer email is not verified yet. Ask the customer to click the verification email before confirming payment." }, { status: 409 });
   }
 
   const booking = await prisma.$transaction(async (tx) => {
     const extraData: Record<string, unknown> = {};
     if (staffId !== undefined) extraData.staffId = staffId || null;
+    if (status === "CONFIRMED") {
+      extraData.paymentConfirmedAt = target.paymentConfirmedAt || new Date();
+      extraData.paymentConfirmedBy = authUser.name || authUser.email;
+    }
+    if (status === "PENDING") {
+      extraData.paymentConfirmedAt = null;
+      extraData.paymentConfirmedBy = null;
+      extraData.staffId = null;
+    }
     if (status === "CANCELLED") extraData.cancellationReason = normalizeCancellationReason(cancellationReason);
     const updated = await updateBookingStatusWithRevenue(tx, String(id), status as BookingStatus, extraData);
     await notifyBookingStatusChanged(tx, updated, authUser.name);
@@ -228,4 +247,26 @@ export async function PUT(req: NextRequest) {
 
   await deliverPendingCustomerNotifications(prisma, booking.id);
   return NextResponse.json({ booking: serializeBooking(booking) });
+}
+
+export async function DELETE(req: NextRequest) {
+  const authUser = await getAuthUser(req);
+  if (!authUser || !isAdminRole(authUser.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const { id, hardDelete } = await req.json().catch(() => ({}));
+  if (!id) return NextResponse.json({ error: "Booking id is required" }, { status: 400 });
+
+  if (hardDelete) {
+    if (authUser.role !== "ADMIN") return NextResponse.json({ error: "Only ADMIN can permanently delete booking records" }, { status: 403 });
+    await prisma.booking.delete({ where: { id: String(id) } });
+    return NextResponse.json({ success: true, deleted: true });
+  }
+
+  const booking = await prisma.booking.update({
+    where: { id: String(id) },
+    data: { archivedAt: new Date() },
+    include: bookingInclude,
+  });
+  return NextResponse.json({ booking: serializeBooking(booking), archived: true });
 }

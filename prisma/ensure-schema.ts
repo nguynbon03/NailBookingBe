@@ -66,6 +66,24 @@ async function main() {
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "emailVerificationSentAt" TIMESTAMP(3);
   `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "paymentConfirmedAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "paymentConfirmedBy" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "staffRejectedAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "staffRejectionReason" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "staffRejectionBy" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "archivedAt" TIMESTAMP(3);
+  `);
 
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "emailVerifiedAt" TIMESTAMP(3);
