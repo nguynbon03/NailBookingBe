@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     if (!authUser) {
       return NextResponse.json({ error: "Please sign in before booking online" }, { status: 401 });
     }
-    if (!authUser.emailVerifiedAt) {
+    if (!authUser.emailVerifiedAt && isValidEmail(String(authUser.email || ""))) {
       return NextResponse.json({ error: "Please verify your account email before booking online" }, { status: 403 });
     }
 
