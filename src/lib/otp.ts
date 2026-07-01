@@ -8,6 +8,17 @@ const OTP_TTL_MINUTES = Number(process.env.OTP_TTL_MINUTES || 5);
 const OTP_MAX_ATTEMPTS = Number(process.env.OTP_MAX_ATTEMPTS || 5);
 const OTP_MAX_PER_PHONE_WINDOW = Number(process.env.OTP_MAX_PER_PHONE_WINDOW || 3);
 const OTP_RATE_WINDOW_MINUTES = Number(process.env.OTP_RATE_WINDOW_MINUTES || 5);
+const OTP_PROVIDER_TIMEOUT_MS = Number(process.env.OTP_PROVIDER_TIMEOUT_MS || 10000);
+
+async function fetchWithTimeout(url: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), OTP_PROVIDER_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function ensureUrl(value: string | undefined) {
   const raw = String(value || "").trim();
@@ -65,7 +76,7 @@ async function sendInfobipSMS(phone: string, otp: string) {
   }
 
   const authorization = rawKey.startsWith("App ") ? rawKey : `App ${rawKey}`;
-  const response = await fetch(`${baseUrl}/sms/1/text/advanced`, {
+  const response = await fetchWithTimeout(`${baseUrl}/sms/1/text/advanced`, {
     method: "POST",
     headers: {
       ["Author" + "ization"]: authorization,
@@ -99,7 +110,7 @@ async function sendEvolutionWhatsApp(phone: string, otp: string) {
     return { success: false, skipped: true, error: "Evolution WhatsApp is not configured" };
   }
 
-  const response = await fetch(`${baseUrl}/message/sendText/${encodeURIComponent(instance)}`, {
+  const response = await fetchWithTimeout(`${baseUrl}/message/sendText/${encodeURIComponent(instance)}`, {
     method: "POST",
     headers: {
       ["api" + "key"]: apiKey,
