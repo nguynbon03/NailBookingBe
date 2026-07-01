@@ -182,6 +182,13 @@ function hasEmailProvider() {
   return hasSmtpProvider() || hasResendProvider();
 }
 
+function hasWhatsAppProvider() {
+  const base = process.env.EVOLUTION_API_BASE_URL;
+  const key = process.env.EVOLUTION_API_KEY;
+  const inst = process.env.EVOLUTION_INSTANCE_NAME || process.env.EVOLUTION_INSTANCE;
+  return Boolean(base && key && inst);
+}
+
 function hasSmsProvider() {
   return Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM_NUMBER);
 }
@@ -206,6 +213,18 @@ export async function queueCustomerBookingNotification(tx: PrismaTx, booking: Cu
     });
   }
   if (booking.customerPhone) {
+  if (booking.customerPhone && hasWhatsAppProvider()) {
+    rows.push({
+      bookingId: booking.id,
+      channel: "WHATSAPP",
+      recipient: booking.customerPhone,
+      event,
+      subject: null,
+      message,
+      status: "PENDING",
+      provider: "evolution",
+    });
+  }
     rows.push({
       bookingId: booking.id,
       channel: "SMS",
@@ -324,6 +343,7 @@ export async function deliverPendingCustomerNotifications(prisma: PrismaClient, 
     try {
       let providerMessageId: string | null = null;
       if (row.channel === "EMAIL") providerMessageId = await sendEmail(row);
+      else if (row.channel === "WHATSAPP") providerMessageId = await sendWhatsApp(row);
       else if (row.channel === "SMS") providerMessageId = await sendSms(row);
       else throw new Error(`Unknown notification channel: ${row.channel}`);
 
@@ -352,4 +372,42 @@ export async function deliverPendingCustomerNotifications(prisma: PrismaClient, 
   }
 
   return summary;
+}
+
+async function sendWhatsApp(row: any) {
+  const baseUrl = ensureUrl(process.env.EVOLUTION_API_BASE_URL);
+  const apiKey = String(process.env.EVOLUTION_API_KEY || "").trim();
+  const instance = String(process.env.EVOLUTION_INSTANCE_NAME || process.env.EVOLUTION_INSTANCE || "nail-lounge").trim();
+  if (!baseUrl || !apiKey || !instance) {
+    throw new Error("WhatsApp provider not configured: set EVOLUTION_API_BASE_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME");
+  }
+  const phone = String(row.recipient || "").replace(/[^0-9+]/g, "");
+  if (!/^\+?[0-9]{8,15}$/.test(phone)) throw new Error("Invalid WhatsApp recipient phone number");
+
+  const text = `${row.subject ? row.subject + "\n\n" : ""}${row.message}`;
+  const response = await fetch(`${baseUrl}/message/sendText/${encodeURIComponent(instance)}`, {
+    method: "POST",
+    headers: {
+      "apikey": apiKey,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      number: phone.replace(/^\\+/, ""),
+      text,
+      delay: 800,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.message || data?.error || `Evolution WhatsApp HTTP ${response.status}`);
+  }
+  return data?.key?.id || data?.messageId || data?.id || null;
+}
+
+function ensureUrl(value: string | undefined) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return (raw.startsWith("http://") || raw.startsWith("https://") ? raw : `https://${raw}`).replace(/\/$/, "");
 }
