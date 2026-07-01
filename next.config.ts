@@ -10,6 +10,8 @@ const nextConfig: NextConfig = {
       { source: "/services", destination: "/api/services" },
       { source: "/availability", destination: "/api/availability" },
       { source: "/notifications", destination: "/api/notifications" },
+      { source: "/notifications/:path*", destination: "/api/notifications/:path*" },
+      { source: "/otp/:path*", destination: "/api/otp/:path*" },
       { source: "/bookings", destination: "/api/bookings" },
       { source: "/bookings/:path*", destination: "/api/bookings/:path*" },
       { source: "/promo-codes/:path*", destination: "/api/promo-codes/:path*" },
