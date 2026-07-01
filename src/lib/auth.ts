@@ -16,7 +16,7 @@ export async function getAuthUser(req: NextRequest) {
 
     return prisma.user.findUnique({
       where: { id },
-      select: { id: true, email: true, name: true, role: true, phone: true, avatar: true, emailVerifiedAt: true },
+      select: { id: true, email: true, name: true, role: true, phone: true, avatar: true, emailVerifiedAt: true, phoneVerifiedAt: true },
     });
   } catch {
     return null;

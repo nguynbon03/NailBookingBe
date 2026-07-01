@@ -19,6 +19,8 @@ model User {
   emailVerificationTokenHash String?
   emailVerificationExpiresAt DateTime?
   emailVerificationSentAt    DateTime?
+  phoneVerifiedAt            DateTime?
+  phoneVerificationSentAt    DateTime?
   createdAt                  DateTime  @default(now())
   updatedAt                  DateTime  @updatedAt
   bookings                   Booking[]
