@@ -21,9 +21,11 @@ export function shouldCountRevenue(status: string) {
 }
 
 export function serializeBooking(booking: any) {
-  return {
+  const base = {
+    return {
     ...booking,
     totalPrice: Number(booking.totalPrice),
+    numPeople: booking.numPeople || 1,
     discount: booking.discount == null ? null : Number(booking.discount),
     services: booking.services?.map((item: any) => ({
       ...item,

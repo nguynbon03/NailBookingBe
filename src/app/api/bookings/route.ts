@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+    const numPeople = Math.max(1, Math.min(10, parseInt(body.numPeople || "1", 10) || 1));
     const { customerName, customerPhone, customerEmail, serviceIds, staffId, promoCode, notes } = body;
     const date = body.date;
     const time = body.time;
@@ -124,7 +125,8 @@ export async function POST(req: NextRequest) {
       if (!ok) return NextResponse.json({ error: "No staff is available at this time" }, { status: 409 });
     }
 
-    let totalPrice = services.reduce((sum: number, s: { price: unknown }) => sum + Number(s.price), 0);
+    let basePrice = services.reduce((sum: number, s: { price: unknown }) => sum + Number(s.price), 0);
+    let totalPrice = Math.round(basePrice * numPeople * 100) / 100;
     let discountAmount = 0;
     let appliedPromoCode: string | null = null;
     const activePromo = await getActivePromo(promoCode);
@@ -170,6 +172,8 @@ export async function POST(req: NextRequest) {
           depositAmount: protection.depositRequired ? protection.depositAmount : null,
           depositModeSnapshot: protection.depositMode,
           notes: notes ? String(notes) : null,
+          numPeople,
+          numPeople,
           services: { create: services.map((service) => ({ serviceId: service.id })) },
         },
         include: bookingInclude,

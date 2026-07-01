@@ -38,9 +38,7 @@ export async function GET(req: NextRequest) {
   });
 
   const schedule: Record<string, any[]> = {};
-  staffList.forEach(staff => {
-    schedule[staff.id] = [];
-  });
+  staffList.forEach(staff => { schedule[staff.id] = []; });
   schedule["unassigned"] = [];
 
   bookings.forEach(b => {

@@ -155,6 +155,7 @@ model Booking {
   paymentReference           String?
   archivedAt                 DateTime?
   notes                      String?
+  numPeople                  Int              @default(1)
   sourceIp                   String?
   userAgent                  String?
   depositRequired            Boolean          @default(false)
