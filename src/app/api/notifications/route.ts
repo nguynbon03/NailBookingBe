@@ -10,6 +10,7 @@ const ADMIN_TICKET_TYPES = [
   "CUSTOMER_CANCELLED_PENDING_BOOKING",
   "STAFF_LEAVE_REQUESTED",
   "STAFF_LEAVE_CANCELLED",
+  "STAFF_REJECTED_JOB",
 ];
 
 function applyNotificationCategory(where: any, category?: string | null) {

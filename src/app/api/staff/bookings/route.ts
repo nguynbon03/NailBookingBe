@@ -41,16 +41,22 @@ export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   const scope = searchParams.get("scope") || "dashboard";
 
-  const requestedStaffFilter = staffProfile
+  const staffVisibilityWhere = staffProfile
     ? { OR: [{ requestedStaffId: null }, { requestedStaffId: staffProfile.id }] }
     : {};
   const availableWhere = {
-    status: "PENDING" as BookingStatus,
     staffId: null,
     archivedAt: null,
     emailVerifiedAt: { not: null },
-    depositRequired: false,
-    ...requestedStaffFilter,
+    AND: [
+      staffVisibilityWhere,
+      {
+        OR: [
+          { status: "PENDING" as BookingStatus, depositRequired: false },
+          { status: "CONFIRMED" as BookingStatus },
+        ],
+      },
+    ],
   };
 
   const mineWhere = staffProfile
@@ -118,10 +124,12 @@ export async function PUT(req: NextRequest) {
   if (existing.archivedAt) return NextResponse.json({ error: "Archived bookings cannot be changed from Staff Portal" }, { status: 409 });
 
   if (action === "claim" || action === "accept") {
-    if (existing.status !== "PENDING" || !existing.emailVerifiedAt) {
-      return NextResponse.json({ error: "Only verified pending booking requests can be accepted by staff" }, { status: 403 });
+    const canAcceptOpenRequest = existing.status === "PENDING" && Boolean(existing.emailVerifiedAt);
+    const canAcceptReplacementJob = existing.status === "CONFIRMED" && !existing.staffId;
+    if (!canAcceptOpenRequest && !canAcceptReplacementJob) {
+      return NextResponse.json({ error: "Only verified open booking requests or replacement jobs can be accepted by staff" }, { status: 403 });
     }
-    if ((existing as any).depositRequired && !(existing as any).paymentConfirmedAt) {
+    if (existing.status === "PENDING" && (existing as any).depositRequired && !(existing as any).paymentConfirmedAt) {
       return NextResponse.json({ error: "This booking requires deposit confirmation before staff can accept it" }, { status: 403 });
     }
     if (existing.staffId && (!staffProfile || existing.staffId !== staffProfile.id)) {
@@ -173,15 +181,25 @@ export async function PUT(req: NextRequest) {
         },
         include: bookingInclude,
       });
-      await tx.notification.create({
-        data: {
-          audience: "ADMIN",
-          staffId: staffProfile?.id || null,
-          bookingId: id,
-          type: "STAFF_REJECTED_JOB",
-          title: "Staff rejected job",
-          message: `${staffProfile?.name || authUser.name} cannot take ${updated.customerName}'s booking. Reason: ${reason}. Booking stays CONFIRMED and returns to the open staff pool. Customer was not cancelled.`,
-        },
+      await tx.notification.createMany({
+        data: [
+          {
+            audience: "ADMIN",
+            staffId: staffProfile?.id || null,
+            bookingId: id,
+            type: "STAFF_REJECTED_JOB",
+            title: "Urgent: staff rejected assigned job",
+            message: `${staffProfile?.name || authUser.name} cannot take ${updated.customerName}'s booking on ${updated.date.toISOString().slice(0, 10)} at ${updated.time}. Reason: ${reason}. Admin/Manager: reassign another staff member now, or contact the customer if no replacement is available. The booking is still confirmed but unassigned and visible again in Staff Portal open requests.`,
+          },
+          {
+            audience: "STAFF",
+            staffId: null,
+            bookingId: id,
+            type: "BOOKING_NEEDS_REPLACEMENT_STAFF",
+            title: "Replacement staff needed",
+            message: `${updated.customerName}'s confirmed booking on ${updated.date.toISOString().slice(0, 10)} at ${updated.time} needs a replacement staff member. Open Staff Portal and accept if you can take it.`,
+          },
+        ],
       });
       return updated;
     });
