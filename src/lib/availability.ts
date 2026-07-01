@@ -88,12 +88,10 @@ async function staffHasApprovedLeave(tx: PrismaTx, staffId: string, date: Date) 
   return Boolean(leave);
 }
 
-async function unassignedBlockingAt(tx: PrismaTx, date: Date, time: string, duration = 30) {
+async function capacityBlockingAt(tx: PrismaTx, date: Date, time: string, duration = 30) {
   const requestedStart = timeToMinutes(time);
   const bookings = await tx.booking.findMany({
     where: {
-      staffId: null,
-      requestedStaffId: null,
       date: dateOnly(date),
       archivedAt: null,
       OR: [
@@ -103,7 +101,18 @@ async function unassignedBlockingAt(tx: PrismaTx, date: Date, time: string, dura
     },
     include: { services: { include: { service: true } } },
   });
-  return bookings.filter((booking: any) => overlaps(requestedStart, duration, timeToMinutes(booking.time), bookingDuration(booking))).length;
+
+  // Cinema-seat logic:
+  // - A normal assigned booking already removes 1 specific staff from availableStaffIdsAt().
+  // - An assigned group booking consumes (numPeople - 1) extra floating capacity.
+  // - An unassigned group booking consumes all numPeople floating capacity.
+  return bookings
+    .filter((booking: any) => overlaps(requestedStart, duration, timeToMinutes(booking.time), bookingDuration(booking)))
+    .reduce((sum: number, booking: any) => {
+      const people = Math.max(1, Number(booking.numPeople || 1));
+      const hasSpecificStaff = Boolean(booking.staffId || booking.requestedStaffId);
+      return sum + (hasSpecificStaff ? Math.max(0, people - 1) : people);
+    }, 0);
 }
 
 export async function isStaffAvailableAndFree(tx: PrismaTx, staffId: string, dateInput: string | Date, time: string, duration = 30, ignoreBookingId?: string) {
@@ -137,11 +146,16 @@ export async function availableStaffIdsAt(tx: PrismaTx, dateInput: string | Date
   return free;
 }
 
-export async function hasAnyAvailableStaff(tx: PrismaTx, dateInput: string | Date, time: string, duration = 30) {
+export async function availableCapacityAt(tx: PrismaTx, dateInput: string | Date, time: string, duration = 30, staffId?: string | null) {
   const date = dateOnly(dateInput);
-  const free = await availableStaffIdsAt(tx, date, time, duration);
-  const pending = await unassignedBlockingAt(tx, date, time, duration);
-  return free.length > pending;
+  const free = await availableStaffIdsAt(tx, date, time, duration, staffId || null);
+  if (staffId) return free.length; // specific staff can only take one person at that time
+  const pendingPeople = await capacityBlockingAt(tx, date, time, duration);
+  return Math.max(0, free.length - pendingPeople);
+}
+
+export async function hasAnyAvailableStaff(tx: PrismaTx, dateInput: string | Date, time: string, duration = 30) {
+  return (await availableCapacityAt(tx, dateInput, time, duration)) > 0;
 }
 
 export async function buildAvailabilitySlots(tx: PrismaTx, dateInput: string | Date, duration = 30, staffId?: string | null) {
@@ -171,7 +185,7 @@ export async function buildAvailabilitySlots(tx: PrismaTx, dateInput: string | D
   for (const [time, ids] of Array.from(slotMap.entries())) {
     let availableStaffCount = ids.size;
     if (!staffId) {
-      availableStaffCount = Math.max(0, availableStaffCount - (await unassignedBlockingAt(tx, date, time, duration)));
+      availableStaffCount = Math.max(0, availableStaffCount - (await capacityBlockingAt(tx, date, time, duration)));
     }
     if (availableStaffCount > 0) {
       slots.push({ time, availableStaffCount, staffIds: Array.from(ids) });

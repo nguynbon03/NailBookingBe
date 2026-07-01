@@ -148,6 +148,9 @@ async function main() {
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "depositModeSnapshot" TEXT;
   `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "numPeople" INTEGER NOT NULL DEFAULT 1;
+  `);
 
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "emailVerifiedAt" TIMESTAMP(3);

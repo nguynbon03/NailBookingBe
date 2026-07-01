@@ -3,7 +3,7 @@ import { BookingStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser, isAdminRole } from "@/lib/auth";
 import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from "@/lib/booking-workflow";
-import { hasAnyAvailableStaff, isStaffAvailableAndFree, availableStaffIdsAt } from "@/lib/availability";
+import { availableCapacityAt, isStaffAvailableAndFree, availableStaffIdsAt } from "@/lib/availability";
 import { notifyBookingCreated, notifyBookingStatusChanged } from "@/lib/notifications";
 import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
 import { createVerificationToken, isValidEmail, normalizeEmail } from "@/lib/email-verification";
@@ -117,12 +117,12 @@ export async function POST(req: NextRequest) {
 
     const totalDuration = services.reduce((sum: number, s: { duration: number }) => sum + Number(s.duration || 0), 0) || 30;
 
-    if (staffId) {
-      const ok = await isStaffAvailableAndFree(prisma, String(staffId), requestedDate, time, totalDuration);
-      if (!ok) return NextResponse.json({ error: "Selected staff is not available at this time" }, { status: 409 });
-    } else {
-      const ok = await hasAnyAvailableStaff(prisma, requestedDate, time, totalDuration);
-      if (!ok) return NextResponse.json({ error: "No staff is available at this time" }, { status: 409 });
+    const availableCapacity = await availableCapacityAt(prisma, requestedDate, time, totalDuration, staffId ? String(staffId) : null);
+    if (availableCapacity < numPeople) {
+      return NextResponse.json({
+        error: `Only ${availableCapacity} staff-capacity slot${availableCapacity === 1 ? "" : "s"} left for this time. Please reduce the number of people or choose another time.`,
+        availableCapacity,
+      }, { status: 409 });
     }
 
     let basePrice = services.reduce((sum: number, s: { price: unknown }) => sum + Number(s.price), 0);
