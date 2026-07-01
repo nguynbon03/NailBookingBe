@@ -21,8 +21,7 @@ export function shouldCountRevenue(status: string) {
 }
 
 export function serializeBooking(booking: any) {
-  const base = {
-    return {
+  return {
     ...booking,
     totalPrice: Number(booking.totalPrice),
     numPeople: booking.numPeople || 1,
