@@ -69,69 +69,88 @@ async function storeOTP(phone: string, otp: string) {
 }
 
 async function sendInfobipSMS(phone: string, otp: string) {
-  const baseUrl = ensureUrl(process.env.INFOBIP_BASE_URL);
-  const rawKey = String(process.env.INFOBIP_API_KEY || "").trim();
-  if (!baseUrl || !rawKey) {
-    return { success: false, skipped: true, error: "Infobip SMS is not configured" };
+  try {
+    const baseUrl = ensureUrl(process.env.INFOBIP_BASE_URL);
+    const rawKey = String(process.env.INFOBIP_API_KEY || "").trim();
+    if (!baseUrl || !rawKey) {
+      return { success: false, skipped: true, error: "Infobip SMS is not configured" };
+    }
+
+    const authorization = rawKey.startsWith("App ") ? rawKey : `App ${rawKey}`;
+    const response = await fetchWithTimeout(`${baseUrl}/sms/1/text/advanced`, {
+      method: "POST",
+      headers: {
+        ["Author" + "ization"]: authorization,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            destinations: [{ to: phone.replace(/^\+/, "") }],
+            text: `Your Nail Lounge verification code is ${otp}. It expires in ${OTP_TTL_MINUTES} minutes. Do not share it.`,
+          },
+        ],
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    return {
+      success: response.ok,
+      skipped: false,
+      messageId: data?.messages?.[0]?.messageId,
+      error: response.ok ? undefined : data?.requestError?.serviceException?.text || data?.error || `Infobip HTTP ${response.status}`,
+    };
+  } catch (error: any) {
+    return { success: false, skipped: false, error: error?.name === "AbortError" ? "Infobip SMS timeout" : error?.message || "Infobip SMS failed" };
   }
-
-  const authorization = rawKey.startsWith("App ") ? rawKey : `App ${rawKey}`;
-  const response = await fetchWithTimeout(`${baseUrl}/sms/1/text/advanced`, {
-    method: "POST",
-    headers: {
-      ["Author" + "ization"]: authorization,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({
-      messages: [
-        {
-          destinations: [{ to: phone.replace(/^\+/, "") }],
-          text: `Your Nail Lounge verification code is ${otp}. It expires in ${OTP_TTL_MINUTES} minutes. Do not share it.`,
-        },
-      ],
-    }),
-  });
-
-  const data = await response.json().catch(() => ({}));
-  return {
-    success: response.ok,
-    skipped: false,
-    messageId: data?.messages?.[0]?.messageId,
-    error: response.ok ? undefined : data?.requestError?.serviceException?.text || data?.error || `Infobip HTTP ${response.status}`,
-  };
 }
 
 async function sendEvolutionWhatsApp(phone: string, otp: string) {
-  const baseUrl = ensureUrl(process.env.EVOLUTION_API_BASE_URL);
-  const apiKey = String(process.env.EVOLUTION_API_KEY || "").trim();
-  const instance = String(process.env.EVOLUTION_INSTANCE_NAME || process.env.EVOLUTION_INSTANCE || "nail-lounge").trim();
-  if (!baseUrl || !apiKey || !instance) {
-    return { success: false, skipped: true, error: "Evolution WhatsApp is not configured" };
+  try {
+    const baseUrl = ensureUrl(process.env.EVOLUTION_API_BASE_URL);
+    const apiKey = String(process.env.EVOLUTION_API_KEY || "").trim();
+    const instance = String(process.env.EVOLUTION_INSTANCE_NAME || process.env.EVOLUTION_INSTANCE || "nail-lounge").trim();
+    if (!baseUrl || !apiKey || !instance) {
+      return { success: false, skipped: true, error: "Evolution WhatsApp is not configured" };
+    }
+
+    const stateRes = await fetchWithTimeout(`${baseUrl}/instance/connectionState/${encodeURIComponent(instance)}`, {
+      headers: { ["api" + "key"]: apiKey, Accept: "application/json" },
+    }).catch(() => null);
+    if (stateRes?.ok) {
+      const state = await stateRes.json().catch(() => null);
+      const current = state?.instance?.state || state?.state || state?.connectionStatus;
+      if (current && !["open", "CONNECTED", "connected"].includes(String(current))) {
+        return { success: false, skipped: false, error: `Evolution WhatsApp is ${current}. Scan QR in Admin > WhatsApp.` };
+      }
+    }
+
+    const response = await fetchWithTimeout(`${baseUrl}/message/sendText/${encodeURIComponent(instance)}`, {
+      method: "POST",
+      headers: {
+        ["api" + "key"]: apiKey,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        number: phone.replace(/^\+/, ""),
+        text: `Nail Lounge OTP: ${otp}\nThis code expires in ${OTP_TTL_MINUTES} minutes. Do not share it.`,
+        delay: 800,
+        linkPreview: false,
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    return {
+      success: response.ok,
+      skipped: false,
+      messageId: data?.key?.id || data?.messageId || data?.id,
+      error: response.ok ? undefined : data?.response?.message || data?.message || `Evolution HTTP ${response.status}`,
+    };
+  } catch (error: any) {
+    return { success: false, skipped: false, error: error?.name === "AbortError" ? "Evolution WhatsApp timeout" : error?.message || "Evolution WhatsApp failed" };
   }
-
-  const response = await fetchWithTimeout(`${baseUrl}/message/sendText/${encodeURIComponent(instance)}`, {
-    method: "POST",
-    headers: {
-      ["api" + "key"]: apiKey,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({
-      number: phone.replace(/^\+/, ""),
-      text: `Nail Lounge OTP: ${otp}\nThis code expires in ${OTP_TTL_MINUTES} minutes. Do not share it.`,
-      delay: 800,
-      linkPreview: false,
-    }),
-  });
-
-  const data = await response.json().catch(() => ({}));
-  return {
-    success: response.ok,
-    skipped: false,
-    messageId: data?.key?.id || data?.messageId || data?.id,
-    error: response.ok ? undefined : data?.response?.message || data?.message || `Evolution HTTP ${response.status}`,
-  };
 }
 
 export async function sendOTP(phoneInput: string, preferredChannel: OtpChannel | "auto" = "auto") {
