@@ -10,8 +10,23 @@ export function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
+export function normalizeVerificationToken(value: unknown) {
+  const match = String(value || "").trim().match(/[a-f0-9]{64}/i);
+  return match ? match[0].toLowerCase() : "";
+}
+
 export function hashVerificationToken(token: string) {
-  return createHash("sha256").update(token).digest("hex");
+  return createHash("sha256").update(normalizeVerificationToken(token) || token).digest("hex");
+}
+
+export function normalizePhone(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.replace(/[\s().-]+/g, "").replace(/^00/, "+");
+}
+
+export function isValidPhone(phone: string) {
+  return /^\+?[0-9]{7,15}$/.test(normalizePhone(phone));
 }
 
 export function createVerificationToken(ttlMinutes = DEFAULT_VERIFY_TTL_MINUTES) {

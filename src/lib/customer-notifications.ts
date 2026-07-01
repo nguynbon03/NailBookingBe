@@ -51,7 +51,7 @@ function escapeHtml(value: unknown) {
 }
 
 function firstUrl(value: string) {
-  return value.match(/https?:\/\/[^\s)]+/)?.[0] || "";
+  return (value.match(/https?:\/\/[^\s)]+/)?.[0] || "").replace(/[.,;:!?]+$/, "");
 }
 
 function renderEmailHtml(subject: string, message: string) {
@@ -61,11 +61,12 @@ function renderEmailHtml(subject: string, message: string) {
   const when = message.match(/ on ([0-9]{4}-[0-9]{2}-[0-9]{2}) at ([0-9:]+)/);
   const amount = message.match(/Amount: (£[0-9,.]+)/)?.[1] || "";
   const isPayment = /secure payment link|transfer link|bank-transfer/i.test(subject + " " + message);
+  const isAccountVerification = /account_verification|verify your nail lounge account email|verify your email/i.test(subject + " " + message);
   const isConfirmed = /confirmed/i.test(subject);
   const isCancelled = /cancelled/i.test(subject);
-  const badge = isCancelled ? "Booking update" : isConfirmed ? "Confirmed booking" : isPayment ? "Secure payment link" : "Booking update";
+  const badge = isAccountVerification ? "Email verification" : isCancelled ? "Booking update" : isConfirmed ? "Confirmed booking" : isPayment ? "Secure payment link" : "Booking update";
   const accent = isCancelled ? "#ef4444" : isConfirmed ? "#10b981" : "#ec4899";
-  const ctaLabel = isPayment ? "Open secure transfer link" : isConfirmed ? "View my booking" : "Open booking details";
+  const ctaLabel = isAccountVerification ? "Verify email" : isPayment ? "Open secure transfer link" : isConfirmed ? "View my booking" : "Open booking details";
   const preheader = isPayment
     ? "Your Nail Lounge booking is saved. A deposit may be required before staff assignment."
     : isConfirmed

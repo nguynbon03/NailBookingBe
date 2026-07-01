@@ -13,7 +13,7 @@ model User {
   password                   String
   name                       String
   role                       Role      @default(CUSTOMER)
-  phone                      String?
+  phone                      String?   @unique
   avatar                     String?
   emailVerifiedAt            DateTime?
   emailVerificationTokenHash String?

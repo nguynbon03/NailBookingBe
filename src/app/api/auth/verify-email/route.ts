@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { hashVerificationToken } from "@/lib/email-verification";
+import { hashVerificationToken, normalizeVerificationToken } from "@/lib/email-verification";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 async function verifyAccount(token: string) {
-  const tokenHash = hashVerificationToken(token);
+  const normalizedToken = normalizeVerificationToken(token);
+  if (!normalizedToken) return { error: "Verification link is invalid", status: 400 } as const;
+  const tokenHash = hashVerificationToken(normalizedToken);
   const user = await prisma.user.findFirst({ where: { emailVerificationTokenHash: tokenHash } });
   if (!user) return { error: "Verification link is invalid", status: 400 } as const;
   if (user.emailVerifiedAt) {
