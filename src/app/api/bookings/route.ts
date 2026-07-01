@@ -74,11 +74,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required booking fields" }, { status: 400 });
     }
 
-    if (!isValidEmail(email)) {
+    const accountUsesEmail = isValidEmail(accountEmail);
+    if (accountUsesEmail && !isValidEmail(email)) {
       return NextResponse.json({ error: "Please enter a valid email address" }, { status: 400 });
     }
     if (email !== accountEmail) {
-      return NextResponse.json({ error: "Booking email must match the signed-in account email" }, { status: 403 });
+      return NextResponse.json({ error: accountUsesEmail ? "Booking email must match the signed-in account email" : "Booking account must match the signed-in account" }, { status: 403 });
     }
 
     const serviceKeys = normalizeServiceInputs(serviceIds);
