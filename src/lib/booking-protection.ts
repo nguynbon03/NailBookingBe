@@ -1,5 +1,8 @@
 import { NextRequest } from "next/server";
-type PrismaDb = any;
+import { prisma } from "./prisma";
+import type { PrismaClient } from "@prisma/client";
+
+type PrismaDb = PrismaClient | any;
 
 type AuthUser = {
   id: string;
