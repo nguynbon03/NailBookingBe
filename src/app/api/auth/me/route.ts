@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     const { payload } = await jwtVerify(token, secret, { clockTolerance: 60 });
     const user = await prisma.user.findUnique({
       where: { id: payload.id as string },
-      select: { id: true, email: true, name: true, role: true, phone: true, emailVerifiedAt: true },
+      select: { id: true, email: true, name: true, role: true, phone: true, emailVerifiedAt: true, phoneVerifiedAt: true },
     });
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
     return NextResponse.json({ user });

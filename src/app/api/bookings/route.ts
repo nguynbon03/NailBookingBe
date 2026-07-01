@@ -55,6 +55,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Please verify your account email before booking online" }, { status: 403 });
     }
 
+    if (!authUser.phoneVerifiedAt) {
+      return NextResponse.json({ error: "Please verify your phone number via WhatsApp or SMS OTP before booking. This is required to prevent spam and fake bookings." }, { status: 403 });
+    }
+
     const body = await req.json();
     const { customerName, customerPhone, customerEmail, serviceIds, staffId, promoCode, notes } = body;
     const date = body.date;
