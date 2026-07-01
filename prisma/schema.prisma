@@ -277,3 +277,15 @@ model CustomerBlocklist {
   @@unique([type, value])
   @@index([active, type, value])
 }
+
+model OTP {
+  id        String   @id @default(cuid())
+  phone     String
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([phone, expiresAt])
+}
+
