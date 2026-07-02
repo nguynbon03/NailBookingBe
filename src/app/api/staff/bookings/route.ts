@@ -64,6 +64,9 @@ export async function GET(req: NextRequest) {
   const mineWhere = staffProfile
     ? { staffId: staffProfile.id, status: { in: ["CONFIRMED"] as BookingStatus[] }, archivedAt: null }
     : { status: { in: ["CONFIRMED"] as BookingStatus[] }, archivedAt: null };
+  const historyWhere = staffProfile
+    ? { staffId: staffProfile.id, status: { in: ["COMPLETED", "NO_SHOW", "CANCELLED"] as BookingStatus[] }, archivedAt: null }
+    : { status: { in: ["COMPLETED", "NO_SHOW", "CANCELLED"] as BookingStatus[] }, archivedAt: null };
 
   if (scope === "available") {
     const availableBookings = await prisma.booking.findMany({
@@ -83,9 +86,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ staffProfile, myBookings: myBookings.map(serializeBooking) });
   }
 
-  const [availableBookings, myBookings, completedToday] = await Promise.all([
+  if (scope === "history") {
+    const historyBookings = await prisma.booking.findMany({
+      where: historyWhere,
+      include: bookingInclude,
+      orderBy: [{ date: "desc" }, { time: "desc" }, { updatedAt: "desc" }],
+      take: 80,
+    });
+    return NextResponse.json({ staffProfile, historyBookings: historyBookings.map(serializeBooking) });
+  }
+
+  const [availableBookings, myBookings, historyBookings, completedToday] = await Promise.all([
     prisma.booking.findMany({ where: availableWhere, include: bookingInclude, orderBy: [{ date: "asc" }, { time: "asc" }] }),
     prisma.booking.findMany({ where: mineWhere, include: bookingInclude, orderBy: [{ date: "asc" }, { time: "asc" }] }),
+    prisma.booking.findMany({ where: historyWhere, include: bookingInclude, orderBy: [{ date: "desc" }, { time: "desc" }, { updatedAt: "desc" }], take: 80 }),
     staffProfile
       ? prisma.booking.count({ where: { staffId: staffProfile.id, status: "COMPLETED", archivedAt: null } })
       : prisma.booking.count({ where: { status: "COMPLETED", archivedAt: null } }),
@@ -95,9 +109,11 @@ export async function GET(req: NextRequest) {
     staffProfile,
     availableBookings: availableBookings.map(serializeBooking),
     myBookings: myBookings.map(serializeBooking),
+    historyBookings: historyBookings.map(serializeBooking),
     stats: {
       available: availableBookings.length,
       assigned: myBookings.length,
+      history: historyBookings.length,
       completed: completedToday,
     },
   });
