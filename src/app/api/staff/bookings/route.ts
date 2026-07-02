@@ -194,34 +194,24 @@ export async function PUT(req: NextRequest) {
         where: { id },
         data: {
           staffId: null,
+          requestedStaffId: null,
           staffRejectedAt: new Date(),
           staffRejectionReason: reason,
           staffRejectionBy: staffProfile?.name || authUser.name,
         },
         include: bookingInclude,
       });
-      await tx.notification.createMany({
-        data: [
-          {
-            audience: "ADMIN",
-            staffId: staffProfile?.id || null,
-            bookingId: id,
-            type: "STAFF_REJECTED_JOB",
-            title: "Urgent: staff rejected assigned job",
-            message: `${staffProfile?.name || authUser.name} cannot take ${updated.customerName}'s booking on ${updated.date.toISOString().slice(0, 10)} at ${updated.time}. Reason: ${reason}. Admin/Manager: reassign another staff member now, or contact the customer if no replacement is available. The booking is still confirmed but unassigned and visible again in Staff Portal open requests.`,
-          },
-          {
-            audience: "STAFF",
-            staffId: null,
-            bookingId: id,
-            type: "BOOKING_NEEDS_REPLACEMENT_STAFF",
-            title: "Replacement staff needed",
-            message: `${updated.customerName}'s confirmed booking on ${updated.date.toISOString().slice(0, 10)} at ${updated.time} needs a replacement staff member. Open Staff Portal and accept if you can take it.`,
-          },
-        ],
+      await tx.notification.create({
+        data: {
+          audience: "ADMIN",
+          staffId: staffProfile?.id || null,
+          bookingId: id,
+          type: "STAFF_REJECTED_JOB",
+          title: "Urgent: staff rejected assigned job",
+          message: `${staffProfile?.name || authUser.name} cannot take ${updated.customerName}'s booking on ${updated.date.toISOString().slice(0, 10)} at ${updated.time}. Reason: ${reason}. Admin/Manager: reassign another staff member now, or contact the customer if no replacement is available. The booking is still confirmed but unassigned and back in the open request pool.`,
+        },
       });
       await queueOwnerBookingEmail(tx, updated, "Urgent: staff rejected assigned job", `Rejected by ${staffProfile?.name || authUser.name}. Reason: ${reason}. Reassign another staff member now.`);
-      await queueStaffBookingEmail(tx, updated, "Replacement staff needed", `Previous staff rejected this booking. Reason: ${reason}. Accept in Staff Portal if you can take it.`, undefined);
       return updated;
     });
     await deliverPendingCustomerNotifications(prisma, booking.id);

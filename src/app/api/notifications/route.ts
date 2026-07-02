@@ -23,15 +23,17 @@ async function resolveStaffId(email: string) {
   return staff?.id || null;
 }
 
+function staffOnlyScope(staffId: string | null) {
+  return { audience: "STAFF", staffId: staffId || "__NO_STAFF_SCOPE__" };
+}
+
 async function notificationScope(req: NextRequest, authUser: any) {
   const audience = req.nextUrl.searchParams.get("audience");
   const where: any = {};
 
   if (audience === "staff" || authUser.role === "STAFF") {
     const staffId = await resolveStaffId(authUser.email);
-    where.audience = "STAFF";
-    where.OR = staffId ? [{ staffId }, { staffId: null }] : [{ staffId: null }];
-    return where;
+    return staffOnlyScope(staffId);
   }
 
   if (isAdminRole(authUser.role)) {
@@ -46,7 +48,7 @@ async function notificationScope(req: NextRequest, authUser: any) {
 async function scopedWhereFromBody(req: NextRequest, authUser: any, body: any) {
   if (body?.audience === "staff" || authUser.role === "STAFF") {
     const staffId = await resolveStaffId(authUser.email);
-    return { audience: "STAFF", OR: staffId ? [{ staffId }, { staffId: null }] : [{ staffId: null }] };
+    return staffOnlyScope(staffId);
   }
   if (isAdminRole(authUser.role)) return { audience: "ADMIN" };
   return { userId: authUser.id };

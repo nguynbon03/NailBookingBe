@@ -90,9 +90,8 @@ export async function queueOwnerBookingEmail(tx: PrismaTx, booking: BookingLike,
 
 export async function queueStaffBookingEmail(tx: PrismaTx, booking: BookingLike, subject: string, extra = "", staffIds?: Array<string | null | undefined>) {
   const ids = uniq(staffIds || [booking.staffId, booking.requestedStaffId]).filter(Boolean);
-  const staff = ids.length
-    ? await tx.staff.findMany({ where: { id: { in: ids } }, select: { id: true, email: true, name: true, active: true } })
-    : await tx.staff.findMany({ where: { active: true }, select: { id: true, email: true, name: true, active: true } });
+  if (!ids.length) return;
+  const staff = await tx.staff.findMany({ where: { id: { in: ids } }, select: { id: true, email: true, name: true, active: true } });
   const recipients = uniq(staff.filter((item) => item.active !== false).map((item) => item.email));
   if (!recipients.length) return;
   const message = `${subject}\n\n${bookingSummaryLine(booking)}\nCustomer phone: ${booking.customerPhone || "-"}${extra ? `\n\n${extra}` : ""}\n\nOpen Staff Portal: ${process.env.PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "https://bookingnail.overpowers.agency"}/staff`;

@@ -38,24 +38,13 @@ export async function notifyBookingCreated(tx: PrismaTx, booking: any, paymentTr
 
   if (!depositRequired) {
     const targets = staffTargetIds(booking);
-    if (targets.length) {
-      for (const staffId of targets) {
-        data.push({
-          audience: "STAFF",
-          staffId,
-          bookingId: booking.id,
-          type: "BOOKING_AVAILABLE_FOR_STAFF",
-          title: "New booking request for you",
-          message: `${booking.customerName} requested ${day} at ${booking.time}. Open Staff Portal and accept if you can take this job.`,
-        });
-      }
-    } else {
+    for (const staffId of targets) {
       data.push({
         audience: "STAFF",
-        staffId: null,
+        staffId,
         bookingId: booking.id,
         type: "BOOKING_AVAILABLE_FOR_STAFF",
-        title: "New booking waiting for staff",
+        title: "New booking request for you",
         message: `${booking.customerName} requested ${day} at ${booking.time}. Open Staff Portal and accept if you can take this job.`,
       });
     }
@@ -74,7 +63,9 @@ export async function notifyBookingCreated(tx: PrismaTx, booking: any, paymentTr
   await queueOwnerBookingEmail(tx, booking, depositRequired ? "New booking needs deposit" : "New booking request", requestedStaffName.trim() || "Open Admin Calendar for live schedule management.");
   if (!depositRequired) {
     const targets = staffTargetIds(booking);
-    await queueStaffBookingEmail(tx, booking, targets.length ? "New booking request for you" : "New booking waiting for staff", "Open Staff Portal to accept if you can take this job.", targets.length ? targets : undefined);
+    if (targets.length) {
+      await queueStaffBookingEmail(tx, booking, "New booking request for you", "Open Staff Portal to accept if you can take this job.", targets);
+    }
   }
   await queueCustomerBookingNotification(tx, { ...booking, paymentTransferUrl }, depositRequired ? "payment_transfer_link" : "booking_created");
 }
@@ -100,21 +91,9 @@ export async function notifyBookingStatusChanged(
     },
   ];
 
-  if (booking.status === "CONFIRMED" && !booking.staffId) {
-    data.push({
-      audience: "STAFF",
-      staffId: null,
-      bookingId: booking.id,
-      type: "BOOKING_AVAILABLE_FOR_STAFF",
-      title: "Booking ready for staff",
-      message: `${booking.customerName}'s booking for ${day} at ${booking.time} is ready. Open Staff Portal and accept the job if you can take it.`,
-    });
-  }
-
   const targets = staffTargetIds(booking);
   if (booking.status === "CANCELLED") {
-    const targetList = targets.length ? targets : [null];
-    for (const staffId of targetList) {
+    for (const staffId of targets) {
       data.push({
         audience: "STAFF",
         staffId,
@@ -149,8 +128,13 @@ export async function notifyBookingStatusChanged(
     `CUSTOMER_BOOKING_${String(booking.status || "UPDATED")}`
   );
   await queueOwnerBookingEmail(tx, booking, `Booking ${String(booking.status).toLowerCase()}`, booking.status === "CANCELLED" ? `Reason: ${booking.cancellationReason || "No reason"}` : "Website notification and email queued for the customer/staff.");
-  if (targets.length || booking.status === "CONFIRMED") {
-    await queueStaffBookingEmail(tx, booking, `Booking ${String(booking.status).toLowerCase()}`, booking.status === "CANCELLED" ? "This slot has been released." : "Check Staff Portal for the live schedule.", targets.length ? targets : undefined);
+  const staffEmailTargets = booking.status === "CANCELLED"
+    ? targets
+    : booking.staffId
+      ? [booking.staffId]
+      : [];
+  if (staffEmailTargets.length) {
+    await queueStaffBookingEmail(tx, booking, `Booking ${String(booking.status).toLowerCase()}`, booking.status === "CANCELLED" ? "This slot has been released." : "Check Staff Portal for the live schedule.", staffEmailTargets);
   }
 
   if (booking.status === "CONFIRMED") {
