@@ -12,9 +12,14 @@ async function main() {
       "startTime" TEXT NOT NULL,
       "endTime" TEXT NOT NULL,
       "active" BOOLEAN NOT NULL DEFAULT true,
+      "createdBySource" TEXT,
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "StaffAvailability" ADD COLUMN IF NOT EXISTS "createdBySource" TEXT;
   `);
 
   await prisma.$executeRawUnsafe(`

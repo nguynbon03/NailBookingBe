@@ -25,6 +25,36 @@ function providerForEmail(delivery: any) {
   return delivery?.provider || (process.env.RESEND_API_KEY ? "resend" : process.env.SMTP_HOST ? "smtp" : "none");
 }
 
+function londonNow(date = new Date()) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/London",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date).map((part) => [part.type, part.value])
+  );
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    minutes: Number(parts.hour || 0) * 60 + Number(parts.minute || 0),
+  };
+}
+
+function dueForDailyRun(config: any, now = new Date()) {
+  const current = londonNow(now);
+  const [hour, minute] = String(config?.dailyReportTime || "08:30").split(":").map((item) => Number(item));
+  const targetMinutes = (Number.isFinite(hour) ? hour : 8) * 60 + (Number.isFinite(minute) ? minute : 30);
+  if (current.minutes < targetMinutes) return { due: false, reason: "Scheduled time has not arrived yet", reportDate: current.date };
+  if (config?.lastDailyReportAt) {
+    const last = londonNow(new Date(config.lastDailyReportAt));
+    if (last.date === current.date) return { due: false, reason: "Daily report already sent today", reportDate: current.date };
+  }
+  return { due: true, reason: "Due", reportDate: current.date };
+}
+
 async function settings() {
   return (prisma as any).calendarSyncSetting.upsert({
     where: { id: "default" },
@@ -41,16 +71,20 @@ export async function POST(req: NextRequest) {
   const auth = authorize(req);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-  const date = req.nextUrl.searchParams.get("date");
+  const requestedDate = req.nextUrl.searchParams.get("date");
   const force = req.nextUrl.searchParams.get("force") === "1";
   const config = await settings();
   if (!force && config && (!config.autoDailyReportEnabled || !config.dailyExportEnabled)) {
-    return NextResponse.json({ ok: true, skipped: true, reason: "Auto daily report is disabled in Admin → Google Sync", settings: config });
+    return NextResponse.json({ ok: true, skipped: true, reason: "Auto daily report is disabled", settings: config });
+  }
+  const due = dueForDailyRun(config);
+  if (!force && !due.due) {
+    return NextResponse.json({ ok: true, skipped: true, reason: due.reason, reportDate: due.reportDate });
   }
 
-  const phone = req.nextUrl.searchParams.get("phone") || config?.ownerPhone || defaultOwnerPhone();
-  const email = req.nextUrl.searchParams.get("email") || config?.ownerEmail || defaultOwnerEmail();
-  const report = await buildRevenueReport(prisma, "day", date);
+  const phone = req.nextUrl.searchParams.get("phone") || config?.ownerPhone || (force ? defaultOwnerPhone() : "");
+  const email = req.nextUrl.searchParams.get("email") || config?.ownerEmail || (force ? defaultOwnerEmail() : "");
+  const report = await buildRevenueReport(prisma, "day", requestedDate || due.reportDate);
   const message = dailySmsText(report);
 
   let smsDelivery: any = null;

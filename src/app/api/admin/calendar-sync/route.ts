@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthUser, isAdminRole } from "@/lib/auth";
 import { calcomConfigured } from "@/lib/calcom";
 import { defaultOwnerEmail, defaultOwnerPhone } from "@/lib/reporting";
-import { googleCalendarRedirectUri, googleClientId, googleClientSecret, googleRedirectUri } from "@/lib/google-auth";
+import { googleClientId, googleClientSecret } from "@/lib/google-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -59,35 +59,21 @@ function cleanNullable(value: unknown) {
 
 function envStatus(req: NextRequest) {
   const base = publicBase(req);
-  const googleMissing = [
-    !googleClientId() ? "GOOGLE_CLIENT_ID / NEXT_PUBLIC_GOOGLE_CLIENT_ID" : "",
-    !googleClientSecret() ? "GOOGLE_CLIENT_SECRET" : "",
-  ].filter(Boolean);
-  const calcomMissing = [
-    !process.env.CALCOM_API_KEY ? "CALCOM_API_KEY" : "",
-    !(process.env.CALCOM_EVENT_TYPE_ID || (process.env.CALCOM_EVENT_TYPE_SLUG && process.env.CALCOM_USERNAME)) ? "CALCOM_EVENT_TYPE_ID or CALCOM_EVENT_TYPE_SLUG + CALCOM_USERNAME" : "",
-  ].filter(Boolean);
+  const googleConfigured = Boolean(googleClientId() && googleClientSecret());
   const smsConfigured = Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && (process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_FROM));
   const emailConfigured = Boolean((process.env.SMTP_HOST && (process.env.SMTP_FROM || process.env.FROM_EMAIL)) || (process.env.RESEND_API_KEY && process.env.FROM_EMAIL));
   return {
     google: {
-      configured: googleMissing.length === 0,
-      missing: googleMissing,
-      loginRedirectUri: googleRedirectUri(),
-      calendarRedirectUri: googleCalendarRedirectUri(),
+      configured: googleConfigured,
       connectUrl: `${base}/api/auth/google?calendar=1&next=${encodeURIComponent("/admin/google-sync")}`,
     },
     calcom: {
       configured: calcomConfigured(),
-      missing: calcomMissing,
-      webhookUrl: `${base}/api/calcom/webhook`,
-      alternateWebhookUrl: `${base}/api/integrations/calcom/webhook`,
     },
     reports: {
       cronSecretConfigured: Boolean(process.env.REPORT_CRON_SECRET || process.env.CRON_SECRET),
       emailConfigured,
       smsConfigured,
-      cronUrl: `${base}/api/admin/reports/revenue/cron`,
       dailyPdfUrl: `${base}/api/admin/reports/revenue/export?period=day&format=pdf`,
       dailyCsvUrl: `${base}/api/admin/reports/revenue/export?period=day&format=csv`,
     },

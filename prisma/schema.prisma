@@ -78,16 +78,17 @@ model StaffLeaveRequest {
 }
 
 model StaffAvailability {
-  id        String    @id @default(cuid())
-  staffId   String
-  dayOfWeek Int?
-  date      DateTime?
-  startTime String
-  endTime   String
-  active    Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  staff     Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  id              String    @id @default(cuid())
+  staffId         String
+  dayOfWeek       Int?
+  date            DateTime?
+  startTime       String
+  endTime         String
+  active          Boolean   @default(true)
+  createdBySource String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  staff           Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
 }
 
 model Notification {

@@ -19,7 +19,7 @@ export async function sendWhatsAppOTP(
 ): Promise<SendWhatsAppResult> {
   const normalizedPhone = phone.replace(/^\+/, "").replace(/^84/, "84"); // 84339351204 format
 
-  const message = `Mã xác thực Nail Lounge của bạn là: ${otp}\n\nMã có hiệu lực trong 5 phút. Không chia sẻ mã này với ai.`;
+  const message = `Your Nail Lounge verification code is: ${otp}\n\nThis code expires in 5 minutes. Do not share it with anyone.`;
 
   try {
     const response = await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
