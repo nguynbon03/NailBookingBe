@@ -14,7 +14,8 @@ type BookingForRevenue = {
   promoCode: string | null;
 };
 
-const REVENUE_STATUSES = new Set(["CONFIRMED", "COMPLETED", "NO_SHOW"]);
+const REVENUE_STATUSES = new Set(["CONFIRMED", "COMPLETED"]);
+export const COUNTED_BOOKING_STATUSES = ["CONFIRMED", "COMPLETED"] as const;
 
 export function shouldCountRevenue(status: string) {
   return REVENUE_STATUSES.has(status);

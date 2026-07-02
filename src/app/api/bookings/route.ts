@@ -9,6 +9,7 @@ import { deliverPendingCustomerNotifications } from "@/lib/customer-notification
 import { createVerificationToken, isValidEmail, normalizeEmail } from "@/lib/email-verification";
 import { bookingReference, paymentTransferUrl } from "@/lib/payment-locks";
 import { assessBookingProtection } from "@/lib/booking-protection";
+import { syncBookingToCalCom, cancelCalComBooking } from "@/lib/calcom";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -302,7 +303,8 @@ export async function PUT(req: NextRequest) {
   });
 
   await deliverPendingCustomerNotifications(prisma, booking.id);
-  return NextResponse.json({ booking: serializeBooking(booking) });
+  const calcomSync = status === "CANCELLED" ? await cancelCalComBooking(prisma, booking as any) : await syncBookingToCalCom(prisma, booking as any);
+  return NextResponse.json({ booking: serializeBooking(booking), calcomSync });
 }
 
 export async function DELETE(req: NextRequest) {

@@ -17,11 +17,12 @@ function loginRedirect(req: NextRequest, next: string, message: string) {
 
 export async function GET(req: NextRequest) {
   const next = req.nextUrl.searchParams.get("next") || "/";
+  const calendar = req.nextUrl.searchParams.get("calendar") === "1";
   if (!googleClientId() || !googleClientSecret()) {
     return loginRedirect(req, next, "Google login is not configured. Please use username/email + password.");
   }
   try {
-    return NextResponse.redirect(googleAuthorizationUrl(next));
+    return NextResponse.redirect(googleAuthorizationUrl(next, { calendar }));
   } catch {
     return loginRedirect(req, next, "Google login is not configured. Please use username/email + password.");
   }

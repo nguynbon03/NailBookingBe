@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { queueCustomerBookingNotification } from "@/lib/customer-notifications";
+import { queueCustomerWebsiteNotification, queueOwnerBookingEmail, queueStaffBookingEmail } from "@/lib/internal-notifications";
 
 type PrismaTx = Omit<
   PrismaClient,
@@ -61,6 +62,20 @@ export async function notifyBookingCreated(tx: PrismaTx, booking: any, paymentTr
   }
 
   await tx.notification.createMany({ data });
+  await queueCustomerWebsiteNotification(
+    tx,
+    booking,
+    depositRequired ? "Deposit needed for your booking" : "Booking request received",
+    depositRequired
+      ? `Your booking request for ${day} at ${booking.time} was received. Please complete the secure deposit step so the shop can assign staff.`
+      : `Your booking request for ${day} at ${booking.time} was received. Staff have been notified and you will see updates here in real time.`,
+    depositRequired ? "CUSTOMER_DEPOSIT_REQUIRED" : "CUSTOMER_BOOKING_REQUEST_CREATED"
+  );
+  await queueOwnerBookingEmail(tx, booking, depositRequired ? "New booking needs deposit" : "New booking request", requestedStaffName.trim() || "Open Admin Calendar for live schedule management.");
+  if (!depositRequired) {
+    const targets = staffTargetIds(booking);
+    await queueStaffBookingEmail(tx, booking, targets.length ? "New booking request for you" : "New booking waiting for staff", "Open Staff Portal to accept if you can take this job.", targets.length ? targets : undefined);
+  }
   await queueCustomerBookingNotification(tx, { ...booking, paymentTransferUrl }, depositRequired ? "payment_transfer_link" : "booking_created");
 }
 
@@ -121,6 +136,22 @@ export async function notifyBookingStatusChanged(
   }
 
   await tx.notification.createMany({ data });
+
+  await queueCustomerWebsiteNotification(
+    tx,
+    booking,
+    booking.status === "CONFIRMED" ? "Booking confirmed" : booking.status === "CANCELLED" ? "Booking cancelled" : booking.status === "NO_SHOW" ? "Booking marked no-show" : `Booking ${String(booking.status).toLowerCase()}`,
+    booking.status === "CANCELLED"
+      ? `Your booking for ${day} at ${booking.time} was cancelled. Reason: ${booking.cancellationReason || "No reason"}.`
+      : booking.status === "CONFIRMED"
+        ? `Your booking for ${day} at ${booking.time} is confirmed with ${staffName || "the shop"}.`
+        : `${booking.customerName}, your booking for ${day} at ${booking.time} is now ${booking.status}.`,
+    `CUSTOMER_BOOKING_${String(booking.status || "UPDATED")}`
+  );
+  await queueOwnerBookingEmail(tx, booking, `Booking ${String(booking.status).toLowerCase()}`, booking.status === "CANCELLED" ? `Reason: ${booking.cancellationReason || "No reason"}` : "Website notification and email queued for the customer/staff.");
+  if (targets.length || booking.status === "CONFIRMED") {
+    await queueStaffBookingEmail(tx, booking, `Booking ${String(booking.status).toLowerCase()}`, booking.status === "CANCELLED" ? "This slot has been released." : "Check Staff Portal for the live schedule.", targets.length ? targets : undefined);
+  }
 
   if (booking.status === "CONFIRMED") {
     await queueCustomerBookingNotification(tx, booking, "booking_confirmed");

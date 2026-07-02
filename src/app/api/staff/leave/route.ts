@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser, isAdminRole, isStaffPortalRole } from "@/lib/auth";
+import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
+import { queueOwnerLeaveEmail, queueStaffLeaveEmail } from "@/lib/internal-notifications";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -109,10 +111,12 @@ export async function POST(req: NextRequest) {
         message: `${staff.name} requested ${created.daysCount} day(s) off from ${startDate.toISOString().slice(0, 10)} to ${endDate.toISOString().slice(0, 10)}. Reason: ${reason}. Review it before planning staff schedule.`,
       },
     });
+    await queueOwnerLeaveEmail(tx, created, "Staff requested leave", "This leave ticket is visible in Admin Inbox and Admin Calendar.");
 
     return created;
   });
 
+  await deliverPendingCustomerNotifications(prisma, null, "internal_staff_leave_alert");
   return NextResponse.json({ leaveRequest: serializeLeave(leaveRequest) });
 }
 
@@ -180,9 +184,13 @@ export async function PUT(req: NextRequest) {
       });
     }
 
+    await queueStaffLeaveEmail(tx, updated, status === "APPROVED" ? "Leave request approved" : "Leave request rejected", managerNote || "");
+    await queueOwnerLeaveEmail(tx, updated, status === "APPROVED" ? "Leave request approved" : "Leave request rejected", affectedBookings.length ? `${affectedBookings.length} assigned booking(s) overlap this approved leave. Reassign them.` : "Staff has been notified by website notification and email.");
+
     return updated;
   });
 
+  await deliverPendingCustomerNotifications(prisma, null, "internal_staff_leave_alert");
   return NextResponse.json({ leaveRequest: serializeLeave(leaveRequest), affectedBookings });
 }
 
@@ -237,9 +245,16 @@ export async function DELETE(req: NextRequest) {
         message: `${existing.staff.name}'s leave request from ${existing.startDate.toISOString().slice(0, 10)} to ${existing.endDate.toISOString().slice(0, 10)} was cancelled.`,
       },
     });
+    if (isOwner) {
+      await queueOwnerLeaveEmail(tx, updated, "Leave request cancelled", "Staff cancelled this leave ticket from Staff Portal.");
+    } else {
+      await queueStaffLeaveEmail(tx, updated, "Leave request cancelled", `Cancelled by ${authUser.name || authUser.email}.`);
+      await queueOwnerLeaveEmail(tx, updated, "Leave request cancelled", `Cancelled by ${authUser.name || authUser.email}.`);
+    }
 
     return updated;
   });
 
+  await deliverPendingCustomerNotifications(prisma, null, "internal_staff_leave_alert");
   return NextResponse.json({ leaveRequest: serializeLeave(leaveRequest), deleted: false });
 }

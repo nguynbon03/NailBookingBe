@@ -155,6 +155,15 @@ model Booking {
   paymentReference           String?
   archivedAt                 DateTime?
   notes                      String?
+  googleCalendarEventId      String?
+  googleCalendarSyncedAt     DateTime?
+  googleCalendarLastError    String?
+  externalProvider           String?
+  externalBookingUid         String?          @unique
+  externalEventTypeId        String?
+  externalLastSyncedAt       DateTime?
+  externalSyncStatus         String?
+  externalPayload            Json?
   numPeople                  Int              @default(1)
   sourceIp                   String?
   userAgent                  String?
@@ -234,6 +243,53 @@ model ReportDeliveryLog {
   sentAt            DateTime?
 
   @@index([reportType, periodStart, channel])
+}
+
+model CalendarSyncSetting {
+  id                 String    @id @default("default")
+  syncEnabled        Boolean   @default(false)
+  dailyExportEnabled Boolean   @default(true)
+  staffEmailEnabled  Boolean   @default(true)
+  ownerEmail         String?
+  ownerCalendarId    String    @default("primary")
+  provider           String    @default("GOOGLE_CALENDAR")
+  lastSyncAt         DateTime?
+  lastExportAt       DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}
+
+model GoogleCalendarConnection {
+  id           String    @id @default(cuid())
+  userId       String
+  staffId      String?
+  email        String
+  accessToken  String?
+  refreshToken String?
+  scope        String?
+  calendarId   String    @default("primary")
+  syncEnabled  Boolean   @default(true)
+  lastSyncAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([userId, calendarId])
+  @@index([staffId])
+  @@index([email])
+}
+
+model CalendarSyncLog {
+  id        String   @id @default(cuid())
+  direction String
+  status    String
+  message   String
+  bookingId String?
+  staffId   String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([bookingId])
+  @@index([staffId])
 }
 
 model PromoCode {

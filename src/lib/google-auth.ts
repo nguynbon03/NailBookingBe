@@ -35,6 +35,10 @@ export function googleRedirectUri() {
   return process.env.GOOGLE_REDIRECT_URI || `${publicAppUrl()}/api/auth/callback/google`;
 }
 
+export function googleCalendarRedirectUri() {
+  return process.env.GOOGLE_CALENDAR_REDIRECT_URI || googleRedirectUri();
+}
+
 export function sanitizeNext(value: unknown) {
   const next = String(value || "/").trim();
   if (!next.startsWith("/") || next.startsWith("//")) return "/";
@@ -42,8 +46,8 @@ export function sanitizeNext(value: unknown) {
   return next;
 }
 
-export function createGoogleState(nextInput: unknown) {
-  const payload = base64url(JSON.stringify({ nonce: randomBytes(16).toString("hex"), next: sanitizeNext(nextInput), ts: Date.now() }));
+export function createGoogleState(nextInput: unknown, calendar = false) {
+  const payload = base64url(JSON.stringify({ nonce: randomBytes(16).toString("hex"), next: sanitizeNext(nextInput), calendar, ts: Date.now() }));
   return `${payload}.${signPayload(payload)}`;
 }
 
@@ -52,23 +56,28 @@ export function verifyGoogleState(state: unknown) {
   if (!payload || !signature || !safeCompare(signature, signPayload(payload))) throw new Error("invalid_state");
   const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   if (!parsed.ts || Date.now() - Number(parsed.ts) > STATE_TTL_MS) throw new Error("expired_state");
-  return { next: sanitizeNext(parsed.next) };
+  return { next: sanitizeNext(parsed.next), calendar: Boolean(parsed.calendar) };
 }
 
-export function googleAuthorizationUrl(nextInput: unknown) {
+export function googleAuthorizationUrl(nextInput: unknown, options: { calendar?: boolean } = {}) {
   const clientId = googleClientId();
   if (!clientId) throw new Error("missing_google_client_id");
+  const calendar = Boolean(options.calendar);
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", clientId);
-  url.searchParams.set("redirect_uri", googleRedirectUri());
+  url.searchParams.set("redirect_uri", calendar ? googleCalendarRedirectUri() : googleRedirectUri());
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "openid email profile");
-  url.searchParams.set("state", createGoogleState(nextInput));
-  url.searchParams.set("prompt", "select_account");
+  url.searchParams.set("scope", calendar ? "openid email profile https://www.googleapis.com/auth/calendar.events" : "openid email profile");
+  url.searchParams.set("state", createGoogleState(nextInput, calendar));
+  url.searchParams.set("prompt", calendar ? "consent" : "select_account");
+  if (calendar) {
+    url.searchParams.set("access_type", "offline");
+    url.searchParams.set("include_granted_scopes", "true");
+  }
   return url;
 }
 
-export async function exchangeGoogleCode(code: string) {
+export async function exchangeGoogleCode(code: string, options: { calendar?: boolean } = {}) {
   const clientId = googleClientId();
   const clientSecret = googleClientSecret();
   if (!clientId || !clientSecret) throw new Error("google_oauth_not_configured");
@@ -80,13 +89,13 @@ export async function exchangeGoogleCode(code: string) {
       code,
       client_id: clientId,
       client_secret: clientSecret,
-      redirect_uri: googleRedirectUri(),
+      redirect_uri: options.calendar ? googleCalendarRedirectUri() : googleRedirectUri(),
       grant_type: "authorization_code",
     }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.id_token) throw new Error(data.error_description || data.error || `Google token HTTP ${res.status}`);
-  return String(data.id_token);
+  return data as { id_token: string; access_token?: string; refresh_token?: string; scope?: string; expires_in?: number; token_type?: string };
 }
 
 export async function verifyGoogleIdToken(idToken: string) {

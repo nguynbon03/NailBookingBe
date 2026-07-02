@@ -134,8 +134,8 @@ export async function PUT(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const actor = await getAuthUser(req);
-    if (!actor || actor.role !== "ADMIN") {
-      return NextResponse.json({ error: "Only ADMIN can delete staff records" }, { status: 403 });
+    if (!actor || !["ADMIN", "MANAGER"].includes(actor.role)) {
+      return NextResponse.json({ error: "Only ADMIN/MANAGER can delete staff records" }, { status: 403 });
     }
     const { id } = await req.json();
     await prisma.staff.delete({ where: { id: String(id) } });

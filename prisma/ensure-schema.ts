@@ -151,6 +151,36 @@ async function main() {
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "numPeople" INTEGER NOT NULL DEFAULT 1;
   `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "googleCalendarEventId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "googleCalendarSyncedAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "googleCalendarLastError" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "externalProvider" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "externalBookingUid" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "externalEventTypeId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "externalLastSyncedAt" TIMESTAMP(3);
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "externalSyncStatus" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "Booking" ADD COLUMN IF NOT EXISTS "externalPayload" JSONB;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "Booking_externalBookingUid_key" ON "Booking" ("externalBookingUid");
+  `);
 
   await prisma.$executeRawUnsafe(`
     ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "emailVerifiedAt" TIMESTAMP(3);
@@ -308,6 +338,72 @@ async function main() {
   `);
   await prisma.$executeRawUnsafe(`
     CREATE INDEX IF NOT EXISTS "ReportDeliveryLog_report_period_channel_idx" ON "ReportDeliveryLog" ("reportType", "periodStart", "channel");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "CalendarSyncSetting" (
+      "id" TEXT PRIMARY KEY DEFAULT 'default',
+      "syncEnabled" BOOLEAN NOT NULL DEFAULT false,
+      "dailyExportEnabled" BOOLEAN NOT NULL DEFAULT true,
+      "staffEmailEnabled" BOOLEAN NOT NULL DEFAULT true,
+      "ownerEmail" TEXT,
+      "ownerCalendarId" TEXT NOT NULL DEFAULT 'primary',
+      "provider" TEXT NOT NULL DEFAULT 'GOOGLE_CALENDAR',
+      "lastSyncAt" TIMESTAMP(3),
+      "lastExportAt" TIMESTAMP(3),
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    INSERT INTO "CalendarSyncSetting" ("id") VALUES ('default') ON CONFLICT ("id") DO NOTHING;
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "GoogleCalendarConnection" (
+      "id" TEXT PRIMARY KEY,
+      "userId" TEXT NOT NULL,
+      "staffId" TEXT,
+      "email" TEXT NOT NULL,
+      "accessToken" TEXT,
+      "refreshToken" TEXT,
+      "scope" TEXT,
+      "calendarId" TEXT NOT NULL DEFAULT 'primary',
+      "syncEnabled" BOOLEAN NOT NULL DEFAULT true,
+      "lastSyncAt" TIMESTAMP(3),
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "GoogleCalendarConnection_userId_calendarId_key" ON "GoogleCalendarConnection" ("userId", "calendarId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "GoogleCalendarConnection_staffId_idx" ON "GoogleCalendarConnection" ("staffId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "GoogleCalendarConnection_email_idx" ON "GoogleCalendarConnection" ("email");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "CalendarSyncLog" (
+      "id" TEXT PRIMARY KEY,
+      "direction" TEXT NOT NULL,
+      "status" TEXT NOT NULL,
+      "message" TEXT NOT NULL,
+      "bookingId" TEXT,
+      "staffId" TEXT,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CalendarSyncLog_createdAt_idx" ON "CalendarSyncLog" ("createdAt");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CalendarSyncLog_bookingId_idx" ON "CalendarSyncLog" ("bookingId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "CalendarSyncLog_staffId_idx" ON "CalendarSyncLog" ("staffId");
   `);
 
   await prisma.$executeRawUnsafe(`

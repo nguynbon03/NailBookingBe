@@ -6,6 +6,8 @@ import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from
 import { isStaffAvailableAndFree } from "@/lib/availability";
 import { notifyBookingStatusChanged } from "@/lib/notifications";
 import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
+import { queueOwnerBookingEmail, queueStaffBookingEmail } from "@/lib/internal-notifications";
+import { syncBookingToCalCom } from "@/lib/calcom";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -160,7 +162,8 @@ export async function PUT(req: NextRequest) {
       return updated;
     });
     await deliverPendingCustomerNotifications(prisma, booking.id);
-    return NextResponse.json({ booking: serializeBooking(booking) });
+    const calcomSync = await syncBookingToCalCom(prisma, booking as any);
+    return NextResponse.json({ booking: serializeBooking(booking), calcomSync });
   }
 
   if (action === "reject") {
@@ -201,8 +204,11 @@ export async function PUT(req: NextRequest) {
           },
         ],
       });
+      await queueOwnerBookingEmail(tx, updated, "Urgent: staff rejected assigned job", `Rejected by ${staffProfile?.name || authUser.name}. Reason: ${reason}. Reassign another staff member now.`);
+      await queueStaffBookingEmail(tx, updated, "Replacement staff needed", `Previous staff rejected this booking. Reason: ${reason}. Accept in Staff Portal if you can take it.`, undefined);
       return updated;
     });
+    await deliverPendingCustomerNotifications(prisma, booking.id);
     return NextResponse.json({ booking: serializeBooking(booking) });
   }
 
@@ -228,5 +234,6 @@ export async function PUT(req: NextRequest) {
     return updated;
   });
   await deliverPendingCustomerNotifications(prisma, booking.id);
-  return NextResponse.json({ booking: serializeBooking(booking) });
+  const calcomSync = await syncBookingToCalCom(prisma, booking as any);
+  return NextResponse.json({ booking: serializeBooking(booking), calcomSync });
 }

@@ -19,7 +19,7 @@ type CustomerBooking = {
   services?: { service?: { name?: string | null } | null }[];
 };
 
-type CustomerEvent = "booking_created" | "booking_confirmed" | "booking_cancelled" | "booking_no_show" | "booking_email_verification" | "account_verification" | "payment_transfer_link" | "daily_revenue_report" | "monthly_revenue_report";
+type CustomerEvent = "booking_created" | "booking_confirmed" | "booking_cancelled" | "booking_no_show" | "booking_email_verification" | "account_verification" | "payment_transfer_link" | "daily_revenue_report" | "monthly_revenue_report" | "internal_owner_booking_alert" | "internal_staff_booking_alert" | "internal_staff_leave_alert";
 
 const SHOP_NAME = process.env.SHOP_NAME || "The Nail Lounge @ Stokesley";
 const PUBLIC_BOOKING_URL = process.env.PUBLIC_BOOKING_URL || "https://bookingnail.overpowers.agency/my-bookings";
@@ -333,7 +333,7 @@ export async function deliverPendingCustomerNotifications(prisma: PrismaClient, 
   const rows = await (prisma as any).customerNotification.findMany({
     where,
     orderBy: { createdAt: "asc" },
-    take: 20,
+    take: 100,
   });
 
   const summary: Record<string, any> = { total: rows.length, sent: 0, failed: 0, skipped: 0, email: null, sms: null };

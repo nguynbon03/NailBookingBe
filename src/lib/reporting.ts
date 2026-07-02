@@ -212,7 +212,8 @@ export async function buildRevenueReport(prisma: PrismaLike, periodParam?: strin
     ownerEmail: OWNER_EMAIL,
     summary: {
       totalRevenue: numberMoney(totalRevenue),
-      bookingCount: bookings.length,
+      bookingCount: revenueBookings.length,
+      totalRequestCount: bookings.length,
       revenueBookingCount: revenueBookings.length,
       pendingCount: pending.length,
       cancelledCount: cancelled.length,
@@ -356,7 +357,7 @@ export function revenueReportPdf(report: Awaited<ReturnType<typeof buildRevenueR
   const lines = [
     `Period: ${report.range.label}`,
     `Total revenue: ${money(report.summary.totalRevenue)}`,
-    `Revenue bookings: ${report.summary.revenueBookingCount}/${report.summary.bookingCount}`,
+    `Revenue bookings: ${report.summary.revenueBookingCount} confirmed/completed (${report.summary.totalRequestCount || report.summary.bookingCount} total requests in range)`,
     `Pending: ${report.summary.pendingCount} | Cancelled: ${report.summary.cancelledCount} | No-show: ${report.summary.noShowCount}`,
     `Discount total: ${money(report.summary.discountTotal)} | Expected deposits: ${money(report.summary.expectedDeposits)}`,
     `Bank transfer/payment confirmed count: ${report.summary.bankTransferConfirmed}`,
