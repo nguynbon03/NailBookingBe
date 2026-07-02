@@ -344,13 +344,21 @@ async function main() {
     CREATE TABLE IF NOT EXISTS "CalendarSyncSetting" (
       "id" TEXT PRIMARY KEY DEFAULT 'default',
       "syncEnabled" BOOLEAN NOT NULL DEFAULT false,
+      "googleSyncEnabled" BOOLEAN NOT NULL DEFAULT false,
+      "calcomSyncEnabled" BOOLEAN NOT NULL DEFAULT false,
       "dailyExportEnabled" BOOLEAN NOT NULL DEFAULT true,
-      "staffEmailEnabled" BOOLEAN NOT NULL DEFAULT true,
+      "autoDailyReportEnabled" BOOLEAN NOT NULL DEFAULT false,
+      "dailyReportEmailEnabled" BOOLEAN NOT NULL DEFAULT true,
+      "dailyReportSmsEnabled" BOOLEAN NOT NULL DEFAULT false,
+      "dailyReportIncludePdf" BOOLEAN NOT NULL DEFAULT true,
+      "dailyReportTime" TEXT NOT NULL DEFAULT '08:30',
       "ownerEmail" TEXT,
+      "ownerPhone" TEXT,
       "ownerCalendarId" TEXT NOT NULL DEFAULT 'primary',
       "provider" TEXT NOT NULL DEFAULT 'GOOGLE_CALENDAR',
       "lastSyncAt" TIMESTAMP(3),
       "lastExportAt" TIMESTAMP(3),
+      "lastDailyReportAt" TIMESTAMP(3),
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -358,6 +366,20 @@ async function main() {
   await prisma.$executeRawUnsafe(`
     INSERT INTO "CalendarSyncSetting" ("id") VALUES ('default') ON CONFLICT ("id") DO NOTHING;
   `);
+  const calendarSettingColumns: Array<[string, string]> = [
+    ["googleSyncEnabled", "BOOLEAN NOT NULL DEFAULT false"],
+    ["calcomSyncEnabled", "BOOLEAN NOT NULL DEFAULT false"],
+    ["autoDailyReportEnabled", "BOOLEAN NOT NULL DEFAULT false"],
+    ["dailyReportEmailEnabled", "BOOLEAN NOT NULL DEFAULT true"],
+    ["dailyReportSmsEnabled", "BOOLEAN NOT NULL DEFAULT false"],
+    ["dailyReportIncludePdf", "BOOLEAN NOT NULL DEFAULT true"],
+    ["dailyReportTime", "TEXT NOT NULL DEFAULT '08:30'"],
+    ["ownerPhone", "TEXT"],
+    ["lastDailyReportAt", "TIMESTAMP(3)"],
+  ];
+  for (const [column, type] of calendarSettingColumns) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "CalendarSyncSetting" ADD COLUMN IF NOT EXISTS "${column}" ${type};`);
+  }
 
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "GoogleCalendarConnection" (

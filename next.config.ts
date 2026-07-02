@@ -18,6 +18,9 @@ const nextConfig: NextConfig = {
       { source: "/payments", destination: "/api/payments" },
       { source: "/payments/:path*", destination: "/api/payments/:path*" },
       { source: "/auth/:path*", destination: "/api/auth/:path*" },
+      { source: "/calcom/:path*", destination: "/api/calcom/:path*" },
+      { source: "/integrations/:path*", destination: "/api/integrations/:path*" },
+      { source: "/google-webhook", destination: "/api/google-webhook" },
       { source: "/admin/:path*", destination: "/api/admin/:path*" },
     ];
   },

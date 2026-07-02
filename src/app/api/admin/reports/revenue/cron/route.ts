@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { deliverPendingCustomerNotifications, queueDirectCustomerNotification } from "@/lib/customer-notifications";
-import { buildRevenueReport, dailySmsText, defaultOwnerPhone } from "@/lib/reporting";
+import { buildRevenueReport, dailySmsText, defaultOwnerEmail, defaultOwnerPhone, revenueReportPdf, sendReportEmail } from "@/lib/reporting";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -16,9 +16,21 @@ function authorize(req: NextRequest) {
 
 function statusFromDelivery(delivery: any) {
   if (delivery?.sent > 0) return "SENT";
-  if (delivery?.skipped > 0) return "SKIPPED";
   if (delivery?.failed > 0) return "FAILED";
+  if (delivery?.skipped > 0) return "SKIPPED";
   return "PENDING";
+}
+
+function providerForEmail(delivery: any) {
+  return delivery?.provider || (process.env.RESEND_API_KEY ? "resend" : process.env.SMTP_HOST ? "smtp" : "none");
+}
+
+async function settings() {
+  return (prisma as any).calendarSyncSetting.upsert({
+    where: { id: "default" },
+    update: {},
+    create: { id: "default", ownerEmail: defaultOwnerEmail() || null, ownerPhone: defaultOwnerPhone() || null },
+  }).catch(() => null);
 }
 
 export async function GET(req: NextRequest) {
@@ -30,49 +42,98 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const date = req.nextUrl.searchParams.get("date");
-  const phone = req.nextUrl.searchParams.get("phone") || defaultOwnerPhone();
-  if (!phone) return NextResponse.json({ error: "Owner phone is required" }, { status: 400 });
+  const force = req.nextUrl.searchParams.get("force") === "1";
+  const config = await settings();
+  if (!force && config && (!config.autoDailyReportEnabled || !config.dailyExportEnabled)) {
+    return NextResponse.json({ ok: true, skipped: true, reason: "Auto daily report is disabled in Admin → Google Sync", settings: config });
+  }
 
+  const phone = req.nextUrl.searchParams.get("phone") || config?.ownerPhone || defaultOwnerPhone();
+  const email = req.nextUrl.searchParams.get("email") || config?.ownerEmail || defaultOwnerEmail();
   const report = await buildRevenueReport(prisma, "day", date);
   const message = dailySmsText(report);
 
-  await queueDirectCustomerNotification(prisma, {
-    recipient: phone,
-    channel: "SMS",
-    event: "daily_revenue_report",
-    subject: "Daily revenue report",
-    message,
-    bookingId: null,
-  });
-  const delivery = await deliverPendingCustomerNotifications(prisma, null, "daily_revenue_report", phone);
-  const status = statusFromDelivery(delivery);
-
-  await (prisma as any).reportDeliveryLog.create({
-    data: {
-      reportType: "daily_revenue_report",
-      period: "day",
-      periodStart: report.range.start,
-      periodEnd: report.range.end,
-      channel: "SMS",
+  let smsDelivery: any = null;
+  let smsStatus = "SKIPPED";
+  if ((force || config?.dailyReportSmsEnabled) && phone) {
+    await queueDirectCustomerNotification(prisma, {
       recipient: phone,
-      status,
-      provider: delivery?.sms?.provider || "twilio",
-      providerMessageId: delivery?.sms?.providerMessageId || null,
-      error: delivery?.sms?.error || null,
-      sentAt: status === "SENT" ? new Date() : null,
-    },
-  }).catch(() => null);
+      channel: "SMS",
+      event: "daily_revenue_report",
+      subject: "Daily revenue report",
+      message,
+      bookingId: null,
+    });
+    smsDelivery = await deliverPendingCustomerNotifications(prisma, null, "daily_revenue_report", phone);
+    smsStatus = statusFromDelivery(smsDelivery);
+    await (prisma as any).reportDeliveryLog.create({
+      data: {
+        reportType: "daily_revenue_report",
+        period: "day",
+        periodStart: report.range.start,
+        periodEnd: report.range.end,
+        channel: "SMS",
+        recipient: phone,
+        status: smsStatus,
+        provider: smsDelivery?.sms?.provider || "twilio",
+        providerMessageId: smsDelivery?.sms?.providerMessageId || null,
+        error: smsDelivery?.sms?.error || null,
+        sentAt: smsStatus === "SENT" ? new Date() : null,
+      },
+    }).catch(() => null);
+  }
 
+  let emailDelivery: any = null;
+  let emailStatus = "SKIPPED";
+  if ((force || config?.dailyReportEmailEnabled) && email) {
+    try {
+      const pdf = revenueReportPdf(report);
+      const filename = `nail-lounge-revenue-day-${report.range.label.replace(/[^0-9A-Za-z-]+/g, "_")}.pdf`;
+      emailDelivery = await sendReportEmail({
+        to: email,
+        subject: `Nail Lounge daily revenue report ${report.range.label}`,
+        text: `${message}\n\nAttached is the PDF export for confirmed/completed revenue only.`,
+        pdf,
+        filename,
+      });
+      emailStatus = "SENT";
+    } catch (error) {
+      emailDelivery = { error: error instanceof Error ? error.message : String(error) };
+      emailStatus = "FAILED";
+    }
+    await (prisma as any).reportDeliveryLog.create({
+      data: {
+        reportType: "daily_revenue_report_pdf",
+        period: "day",
+        periodStart: report.range.start,
+        periodEnd: report.range.end,
+        channel: "EMAIL",
+        recipient: email,
+        status: emailStatus,
+        provider: providerForEmail(emailDelivery),
+        providerMessageId: emailDelivery?.messageId || null,
+        error: emailDelivery?.error || null,
+        sentAt: emailStatus === "SENT" ? new Date() : null,
+      },
+    }).catch(() => null);
+  }
+
+  await (prisma as any).calendarSyncSetting.update({ where: { id: "default" }, data: { lastDailyReportAt: new Date(), lastExportAt: new Date() } }).catch(() => null);
   await prisma.notification.create({
     data: {
       audience: "ADMIN",
       type: "DAILY_REVENUE_REPORT_SENT",
-      title: status === "SENT" ? "Daily revenue SMS sent" : "Daily revenue SMS not sent",
-      message: status === "SENT"
-        ? `Daily revenue SMS sent to owner for ${report.range.label}: ${message}`
-        : `Daily revenue SMS attempted for ${report.range.label} but status is ${status}. ${delivery?.sms?.error || "Check SMS provider configuration."}`,
+      title: smsStatus === "SENT" || emailStatus === "SENT" ? "Daily revenue report sent" : "Daily revenue report attempted",
+      message: `Daily revenue report for ${report.range.label}. SMS: ${smsStatus}${smsDelivery?.sms?.error ? ` (${smsDelivery.sms.error})` : ""}. Email: ${emailStatus}${emailDelivery?.error ? ` (${emailDelivery.error})` : ""}. Revenue: ${message}`,
     },
   }).catch(() => null);
 
-  return NextResponse.json({ ok: status === "SENT", status, recipient: phone, message, delivery, range: report.range });
+  return NextResponse.json({
+    ok: smsStatus === "SENT" || emailStatus === "SENT",
+    status: { sms: smsStatus, email: emailStatus },
+    recipients: { phone, email },
+    message,
+    delivery: { sms: smsDelivery, email: emailDelivery },
+    range: report.range,
+  });
 }
