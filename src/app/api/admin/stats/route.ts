@@ -1,24 +1,19 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { BookingStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getAuthUser, isAdminRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+type Granularity = "daily" | "monthly" | "yearly";
 
 function money(value: unknown) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
-function dateKey(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function monthKey(date: Date) {
-  return date.toISOString().slice(0, 7);
-}
-
-function yearKey(date: Date) {
-  return String(date.getUTCFullYear());
+function startOfUtcDay(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
 function addDays(date: Date, days: number) {
@@ -33,6 +28,79 @@ function addMonths(date: Date, months: number) {
   return next;
 }
 
+function dateKey(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function monthKey(date: Date) {
+  return date.toISOString().slice(0, 7);
+}
+
+function yearKey(date: Date) {
+  return String(date.getUTCFullYear());
+}
+
+function parseDate(value: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return startOfUtcDay(date);
+}
+
+function describeRange(start: Date, endExclusive: Date) {
+  return `${dateKey(start)} to ${dateKey(addDays(endExclusive, -1))}`;
+}
+
+function resolveFilters(req: NextRequest) {
+  const search = req.nextUrl.searchParams;
+  const granularity = (search.get("granularity") === "monthly" || search.get("granularity") === "yearly")
+    ? (search.get("granularity") as Granularity)
+    : "daily";
+
+  const today = startOfUtcDay(new Date());
+  const defaultStart = addDays(today, -13);
+  const rawFrom = parseDate(search.get("fromDate")) || defaultStart;
+  const rawTo = parseDate(search.get("toDate")) || today;
+  const safeStart = rawFrom <= rawTo ? rawFrom : rawTo;
+  const safeTo = rawFrom <= rawTo ? rawTo : rawFrom;
+  const endExclusive = addDays(safeTo, 1);
+
+  return {
+    granularity,
+    start: safeStart,
+    endExclusive,
+    fromDate: dateKey(safeStart),
+    toDate: dateKey(safeTo),
+    label: describeRange(safeStart, endExclusive),
+  };
+}
+
+function buildKeys(granularity: Granularity, start: Date, endExclusive: Date) {
+  if (granularity === "yearly") {
+    const keys: string[] = [];
+    for (let year = start.getUTCFullYear(); year <= addDays(endExclusive, -1).getUTCFullYear(); year += 1) keys.push(String(year));
+    return keys;
+  }
+
+  if (granularity === "monthly") {
+    const keys: string[] = [];
+    let cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+    while (cursor < endExclusive) {
+      keys.push(monthKey(cursor));
+      cursor = addMonths(cursor, 1);
+    }
+    return keys;
+  }
+
+  const keys: string[] = [];
+  let cursor = new Date(start);
+  while (cursor < endExclusive) {
+    keys.push(dateKey(cursor));
+    cursor = addDays(cursor, 1);
+  }
+  return keys;
+}
+
 function buildSeries(keys: string[], revenueTotals: Map<string, number>, countTotals: Map<string, number>) {
   return keys.map((key) => ({
     label: key,
@@ -41,24 +109,32 @@ function buildSeries(keys: string[], revenueTotals: Map<string, number>, countTo
   }));
 }
 
-export async function GET() {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear() - 3, 0, 1));
-  const revenueStatuses: BookingStatus[] = ["CONFIRMED", "COMPLETED"];
+export async function GET(req: NextRequest) {
+  const authUser = await getAuthUser(req);
+  if (!authUser || !isAdminRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const [totalUsers, customers, adminUsers, bookings, allBookingsForSeries, confirmedBookings, services, activeServices, activePromoCodes, promoCodes] = await Promise.all([
+  const filters = resolveFilters(req);
+  const revenueStatuses: BookingStatus[] = ["CONFIRMED", "COMPLETED"];
+  const activeBookingWhere = {
+    archivedAt: null,
+    date: { gte: filters.start, lt: filters.endExclusive },
+  } as const;
+
+  const [totalUsers, customers, adminUsers, bookings, pendingBookings, cancelledBookings, allBookingsForSeries, confirmedBookings, services, activeServices, activePromoCodes, promoCodes] = await Promise.all([
     prisma.user.count(),
     prisma.user.count({ where: { role: "CUSTOMER" } }),
     prisma.user.count({ where: { role: { in: ["ADMIN", "MANAGER", "STAFF"] } } }),
-    prisma.booking.count(),
+    prisma.booking.count({ where: activeBookingWhere }),
+    prisma.booking.count({ where: { ...activeBookingWhere, status: "PENDING" } }),
+    prisma.booking.count({ where: { ...activeBookingWhere, status: "CANCELLED" } }),
     prisma.booking.findMany({
-      where: { date: { gte: start }, archivedAt: null },
+      where: activeBookingWhere,
       select: { id: true, date: true, status: true },
       orderBy: { date: "asc" },
     }),
     prisma.booking.findMany({
-      where: { status: { in: revenueStatuses }, date: { gte: start }, archivedAt: null },
-      select: { id: true, date: true, totalPrice: true, discount: true, promoCode: true, status: true },
+      where: { ...activeBookingWhere, status: { in: revenueStatuses } },
+      select: { id: true, date: true, totalPrice: true, status: true },
       orderBy: { date: "asc" },
     }),
     prisma.service.count(),
@@ -76,36 +152,33 @@ export async function GET() {
   let revenue = 0;
 
   for (const booking of allBookingsForSeries) {
-    const day = dateKey(booking.date);
-    const month = monthKey(booking.date);
-    const year = yearKey(booking.date);
-    dailyCounts.set(day, (dailyCounts.get(day) || 0) + 1);
-    monthlyCounts.set(month, (monthlyCounts.get(month) || 0) + 1);
-    yearlyCounts.set(year, (yearlyCounts.get(year) || 0) + 1);
+    dailyCounts.set(dateKey(booking.date), (dailyCounts.get(dateKey(booking.date)) || 0) + 1);
+    monthlyCounts.set(monthKey(booking.date), (monthlyCounts.get(monthKey(booking.date)) || 0) + 1);
+    yearlyCounts.set(yearKey(booking.date), (yearlyCounts.get(yearKey(booking.date)) || 0) + 1);
   }
 
   for (const booking of confirmedBookings) {
-    const amount = Number(booking.totalPrice);
+    const amount = Number(booking.totalPrice || 0);
     revenue += amount;
     dailyTotals.set(dateKey(booking.date), (dailyTotals.get(dateKey(booking.date)) || 0) + amount);
     monthlyTotals.set(monthKey(booking.date), (monthlyTotals.get(monthKey(booking.date)) || 0) + amount);
     yearlyTotals.set(yearKey(booking.date), (yearlyTotals.get(yearKey(booking.date)) || 0) + amount);
   }
 
-  const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const dayKeys = Array.from({ length: 14 }, (_, index) => dateKey(addDays(todayUtc, index - 13)));
-  const firstMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const monthKeys = Array.from({ length: 12 }, (_, index) => monthKey(addMonths(firstMonth, index - 11)));
-  const yearKeys = Array.from({ length: 4 }, (_, index) => String(now.getUTCFullYear() - 3 + index));
+  const dayKeys = buildKeys("daily", filters.start, filters.endExclusive);
+  const monthKeys = buildKeys("monthly", filters.start, filters.endExclusive);
+  const yearKeys = buildKeys("yearly", filters.start, filters.endExclusive);
 
   return NextResponse.json({
+    filters,
     stats: {
       totalUsers,
       customers,
       adminUsers,
       bookings,
       confirmedBookings: confirmedBookings.length,
-      pendingBookings: await prisma.booking.count({ where: { status: "PENDING" } }),
+      pendingBookings,
+      cancelledBookings,
       revenue: money(revenue),
       services,
       activeServices,

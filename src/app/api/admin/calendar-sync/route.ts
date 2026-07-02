@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthUser, isAdminRole } from "@/lib/auth";
 import { calcomConfigured } from "@/lib/calcom";
 import { defaultOwnerEmail, defaultOwnerPhone } from "@/lib/reporting";
-import { googleClientId, googleClientSecret } from "@/lib/google-auth";
+import { googleCalendarRedirectUri, googleClientId, googleClientSecret } from "@/lib/google-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -25,7 +25,7 @@ type SettingUpdate = {
 };
 
 function publicBase(req: NextRequest) {
-  return (process.env.PUBLIC_APP_URL || process.env.NEXTAUTH_URL || req.headers.get("x-forwarded-origin") || req.nextUrl.origin).replace(/\/$/, "");
+  return (process.env.PUBLIC_APP_URL || process.env.NEXTAUTH_URL || process.env.FRONTEND_URL || "https://bookingnail.overpowers.agency").replace(/\/$/, "");
 }
 
 async function requireAdmin(req: NextRequest) {
@@ -66,6 +66,7 @@ function envStatus(req: NextRequest) {
     google: {
       configured: googleConfigured,
       connectUrl: `${base}/api/auth/google?calendar=1&next=${encodeURIComponent("/admin/google-sync")}`,
+      redirectUri: googleCalendarRedirectUri(),
     },
     calcom: {
       configured: calcomConfigured(),

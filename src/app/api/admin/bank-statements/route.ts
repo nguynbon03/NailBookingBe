@@ -16,7 +16,12 @@ export async function GET(req: NextRequest) {
   const authUser = await requireAdmin(req);
   if (!authUser) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { searchParams } = req.nextUrl;
-  const range = resolvePeriod(searchParams.get("period") || "month", searchParams.get("date"));
+  const range = resolvePeriod(
+    searchParams.get("period") || "month",
+    searchParams.get("date"),
+    searchParams.get("fromDate"),
+    searchParams.get("toDate"),
+  );
   const entries = await listBankStatementEntries(prisma, range.start, range.end);
   const credits = entries.filter((entry: any) => Number(entry.amount || 0) > 0);
   const debits = entries.filter((entry: any) => Number(entry.amount || 0) < 0);

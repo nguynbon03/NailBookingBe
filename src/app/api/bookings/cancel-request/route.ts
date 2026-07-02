@@ -4,6 +4,7 @@ import { getAuthUser } from "@/lib/auth";
 import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from "@/lib/booking-workflow";
 import { notifyBookingStatusChanged } from "@/lib/notifications";
 import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
+import { queueOwnerBookingEmail } from "@/lib/internal-notifications";
 import { bookingReference } from "@/lib/payment-locks";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +56,7 @@ export async function POST(req: NextRequest) {
           message: `${booking.customerName} cancelled pending booking ${reference}. The slot is now released. Reason: ${reason}.`,
         },
       });
+      await queueOwnerBookingEmail(tx, saved, "Customer cancelled pending booking", `Booking ${reference} was cancelled before confirmation. Reason: ${reason}.`);
       return saved;
     }
 
@@ -88,6 +90,7 @@ export async function POST(req: NextRequest) {
       });
     }
     await tx.notification.createMany({ data: notifications });
+    await queueOwnerBookingEmail(tx, saved, "Customer requested cancellation", `Review booking ${reference} in Admin Bookings. Customer message: ${reason}.`);
     return saved;
   });
 

@@ -87,6 +87,20 @@ export async function POST(req: NextRequest) {
   if (endDate < startDate) return NextResponse.json({ error: "End date must be after start date" }, { status: 400 });
 
   const reason = cleanText(body.reason, "Leave requested");
+  const existingPending = await prisma.staffLeaveRequest.findFirst({
+    where: {
+      staffId: staff.id,
+      startDate,
+      endDate,
+      reason,
+      status: "PENDING",
+    },
+    include: { staff: { select: { id: true, name: true, email: true, role: true } } },
+  });
+  if (existingPending) {
+    return NextResponse.json({ leaveRequest: serializeLeave(existingPending), deduped: true });
+  }
+
   const leaveRequest = await prisma.$transaction(async (tx) => {
     const created = await tx.staffLeaveRequest.create({
       data: {

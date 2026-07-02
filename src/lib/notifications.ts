@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { queueCustomerBookingNotification } from "@/lib/customer-notifications";
-import { queueCustomerWebsiteNotification, queueOwnerBookingEmail, queueStaffBookingEmail } from "@/lib/internal-notifications";
+import { queueCustomerWebsiteNotification, queueStaffBookingEmail } from "@/lib/internal-notifications";
 
 type PrismaTx = Omit<
   PrismaClient,
@@ -60,7 +60,6 @@ export async function notifyBookingCreated(tx: PrismaTx, booking: any, paymentTr
       : `Your booking request for ${day} at ${booking.time} was received. Staff have been notified and you will see updates here in real time.`,
     depositRequired ? "CUSTOMER_DEPOSIT_REQUIRED" : "CUSTOMER_BOOKING_REQUEST_CREATED"
   );
-  await queueOwnerBookingEmail(tx, booking, depositRequired ? "New booking needs deposit" : "New booking request", requestedStaffName.trim() || "Open Admin Calendar for live schedule management.");
   if (!depositRequired) {
     const targets = staffTargetIds(booking);
     if (targets.length) {
@@ -127,7 +126,6 @@ export async function notifyBookingStatusChanged(
         : `${booking.customerName}, your booking for ${day} at ${booking.time} is now ${booking.status}.`,
     `CUSTOMER_BOOKING_${String(booking.status || "UPDATED")}`
   );
-  await queueOwnerBookingEmail(tx, booking, `Booking ${String(booking.status).toLowerCase()}`, booking.status === "CANCELLED" ? `Reason: ${booking.cancellationReason || "No reason"}` : "Website notification and email queued for the customer/staff.");
   const staffEmailTargets = booking.status === "CANCELLED"
     ? targets
     : booking.staffId

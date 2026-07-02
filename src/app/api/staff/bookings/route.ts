@@ -141,6 +141,10 @@ export async function PUT(req: NextRequest) {
   if (!existing) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
   if (existing.archivedAt) return NextResponse.json({ error: "Archived bookings cannot be changed from Staff Portal" }, { status: 409 });
 
+  if ((action === "claim" || action === "accept") && staffProfile && existing.status === "CONFIRMED" && existing.staffId === staffProfile.id) {
+    return NextResponse.json({ booking: serializeBooking(existing), deduped: true });
+  }
+
   if (action === "claim" || action === "accept") {
     const canAcceptOpenRequest = existing.status === "PENDING" && Boolean(existing.emailVerifiedAt);
     const canAcceptReplacementJob = existing.status === "CONFIRMED" && !existing.staffId;

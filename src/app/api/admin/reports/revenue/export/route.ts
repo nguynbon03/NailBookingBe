@@ -10,7 +10,13 @@ export async function GET(req: NextRequest) {
   const authUser = await getAuthUser(req);
   if (!authUser || !isAdminRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { searchParams } = req.nextUrl;
-  const report = await buildRevenueReport(prisma, searchParams.get("period") || "month", searchParams.get("date"));
+  const report = await buildRevenueReport(
+    prisma,
+    searchParams.get("period") || "month",
+    searchParams.get("date"),
+    searchParams.get("fromDate"),
+    searchParams.get("toDate"),
+  );
   const format = String(searchParams.get("format") || "pdf").toLowerCase();
   const safeLabel = report.range.label.replace(/[^0-9A-Za-z-]+/g, "_");
   if (format === "csv" || format === "xls" || format === "excel") {

@@ -4,7 +4,7 @@ import { shouldCountRevenue } from "@/lib/booking-workflow";
 
 type PrismaLike = PrismaClient;
 
-type Period = "day" | "week" | "month" | "year";
+type Period = "day" | "week" | "month" | "year" | "range";
 
 const SHOP_NAME = process.env.SHOP_NAME || "The Nail Lounge @ Stokesley";
 const OWNER_PHONE = process.env.REPORT_OWNER_PHONE || process.env.SHOP_OWNER_PHONE || process.env.OWNER_PHONE || "+447774292572";
@@ -46,9 +46,19 @@ export function numberMoney(value: unknown) {
   return Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 }
 
-export function resolvePeriod(periodParam?: string | null, dateParam?: string | null): { period: Period; start: Date; end: Date; label: string } {
-  const period: Period = periodParam === "week" || periodParam === "month" || periodParam === "year" ? periodParam : "day";
+export function resolvePeriod(periodParam?: string | null, dateParam?: string | null, fromDateParam?: string | null, toDateParam?: string | null): { period: Period; start: Date; end: Date; label: string } {
+  const hasRange = periodParam === "range" || Boolean(fromDateParam) || Boolean(toDateParam);
   const base = asDate(dateParam);
+  if (hasRange) {
+    const start = startOfUtcDay(asDate(fromDateParam || dateParam));
+    const endBase = startOfUtcDay(asDate(toDateParam || fromDateParam || dateParam));
+    const safeStart = start <= endBase ? start : endBase;
+    const safeEndBase = start <= endBase ? endBase : start;
+    const end = addDays(safeEndBase, 1);
+    return { period: "range", start: safeStart, end, label: `${isoDay(safeStart)} to ${isoDay(safeEndBase)}` };
+  }
+
+  const period: Period = periodParam === "week" || periodParam === "month" || periodParam === "year" ? periodParam : "day";
   if (period === "year") {
     const start = new Date(Date.UTC(base.getUTCFullYear(), 0, 1));
     const end = new Date(Date.UTC(base.getUTCFullYear() + 1, 0, 1));
@@ -79,8 +89,8 @@ function staffText(booking: any) {
   return booking.staff?.name || booking.requestedStaff?.name || "Any Staff";
 }
 
-export async function buildCustomerReport(prisma: PrismaLike, periodParam?: string | null, dateParam?: string | null) {
-  const range = resolvePeriod(periodParam, dateParam);
+export async function buildCustomerReport(prisma: PrismaLike, periodParam?: string | null, dateParam?: string | null, fromDateParam?: string | null, toDateParam?: string | null) {
+  const range = resolvePeriod(periodParam, dateParam, fromDateParam, toDateParam);
   const [bookings, users] = await Promise.all([
     prisma.booking.findMany({
       where: { date: { gte: range.start, lt: range.end }, archivedAt: null },
@@ -168,8 +178,8 @@ export async function buildCustomerReport(prisma: PrismaLike, periodParam?: stri
   };
 }
 
-export async function buildRevenueReport(prisma: PrismaLike, periodParam?: string | null, dateParam?: string | null) {
-  const range = resolvePeriod(periodParam, dateParam);
+export async function buildRevenueReport(prisma: PrismaLike, periodParam?: string | null, dateParam?: string | null, fromDateParam?: string | null, toDateParam?: string | null) {
+  const range = resolvePeriod(periodParam, dateParam, fromDateParam, toDateParam);
   const [bookings, bankEntries] = await Promise.all([
     prisma.booking.findMany({
       where: { date: { gte: range.start, lt: range.end }, archivedAt: null },

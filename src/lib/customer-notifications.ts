@@ -245,13 +245,31 @@ export async function queueDirectCustomerNotification(
   data: { recipient: string; event: CustomerEvent; subject: string; message: string; channel?: "EMAIL" | "SMS"; bookingId?: string | null }
 ) {
   const channel = data.channel || "EMAIL";
-  await (tx as any).customerNotification.create({
+  const recipient = String(data.recipient || "").trim();
+  const subject = channel === "EMAIL" ? data.subject : null;
+  const dedupeSince = new Date(Date.now() - 10 * 60 * 1000);
+  const existing = await (tx as any).customerNotification.findFirst({
+    where: {
+      bookingId: data.bookingId || null,
+      channel,
+      recipient,
+      event: data.event,
+      subject,
+      message: data.message,
+      status: { in: ["PENDING", "SENT"] },
+      createdAt: { gte: dedupeSince },
+    },
+    select: { id: true },
+  }).catch(() => null);
+  if (existing?.id) return existing;
+
+  return (tx as any).customerNotification.create({
     data: {
       bookingId: data.bookingId || null,
       channel,
-      recipient: data.recipient,
+      recipient,
       event: data.event,
-      subject: channel === "EMAIL" ? data.subject : null,
+      subject,
       message: data.message,
       status: "PENDING",
       provider: channel === "EMAIL" ? (hasSmtpProvider() ? "smtp" : hasResendProvider() ? "resend" : null) : (hasSmsProvider() ? "twilio" : null),

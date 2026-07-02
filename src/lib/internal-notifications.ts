@@ -47,6 +47,14 @@ export function bookingSummaryLine(booking: BookingLike) {
 }
 
 export async function ownerEmails(tx: PrismaTx) {
+  const settings = await (tx as any).calendarSyncSetting.findUnique({
+    where: { id: "default" },
+    select: { ownerEmail: true },
+  }).catch(() => null);
+
+  const configuredOwner = uniq([settings?.ownerEmail]);
+  if (configuredOwner.length) return configuredOwner;
+
   const envEmails = uniq([
     process.env.REPORT_OWNER_EMAIL,
     process.env.SHOP_OWNER_EMAIL,
@@ -54,11 +62,13 @@ export async function ownerEmails(tx: PrismaTx) {
     process.env.FROM_EMAIL,
     process.env.SMTP_FROM,
   ]);
+  if (envEmails.length) return envEmails;
+
   const adminUsers = await tx.user.findMany({
     where: { role: { in: ["ADMIN", "MANAGER"] } },
     select: { email: true },
   }).catch(() => []);
-  return uniq([...envEmails, ...adminUsers.map((user) => user.email)]);
+  return uniq(adminUsers.map((user) => user.email));
 }
 
 async function queueInternalEmail(

@@ -16,7 +16,13 @@ export async function GET(req: NextRequest) {
   const authUser = await requireAdmin(req);
   if (!authUser) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { searchParams } = req.nextUrl;
-  const report = await buildRevenueReport(prisma, searchParams.get("period") || "day", searchParams.get("date"));
+  const report = await buildRevenueReport(
+    prisma,
+    searchParams.get("period") || "day",
+    searchParams.get("date"),
+    searchParams.get("fromDate"),
+    searchParams.get("toDate"),
+  );
   return NextResponse.json(report);
 }
 
@@ -27,7 +33,9 @@ export async function POST(req: NextRequest) {
   const action = String(body.action || "");
   const period = String(body.period || (action === "sendMonthlyEmail" ? "month" : "day"));
   const date = body.date ? String(body.date) : null;
-  const report = await buildRevenueReport(prisma, period, date);
+  const fromDate = body.fromDate ? String(body.fromDate) : null;
+  const toDate = body.toDate ? String(body.toDate) : null;
+  const report = await buildRevenueReport(prisma, period, date, fromDate, toDate);
 
   if (action === "sendDailySms") {
     const recipient = String(body.phone || defaultOwnerPhone()).trim();

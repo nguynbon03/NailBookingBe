@@ -72,7 +72,19 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   try {
-    const availability = await prisma.staffAvailability.create({ data: payload(body, staffId) });
+    const next = payload(body, staffId);
+    const existing = await prisma.staffAvailability.findFirst({
+      where: {
+        staffId,
+        createdBySource: STAFF_SOURCE,
+        dayOfWeek: next.dayOfWeek,
+        date: next.date,
+        startTime: next.startTime,
+        endTime: next.endTime,
+      },
+    });
+    if (existing) return NextResponse.json({ availability: existing, deduped: true });
+    const availability = await prisma.staffAvailability.create({ data: next });
     return NextResponse.json({ availability });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not save availability" }, { status: 400 });
