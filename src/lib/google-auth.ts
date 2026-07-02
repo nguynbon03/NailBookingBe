@@ -31,12 +31,18 @@ export function googleClientSecret() {
   return process.env.GOOGLE_CLIENT_SECRET || "";
 }
 
+function normalizedGoogleRedirect(value?: string) {
+  const fallback = `${publicAppUrl()}/api/auth/callback/google`;
+  const raw = String(value || "").trim() || fallback;
+  return raw.replace("/api/google-calendar/callback", "/api/auth/callback/google");
+}
+
 export function googleRedirectUri() {
-  return process.env.GOOGLE_REDIRECT_URI || `${publicAppUrl()}/api/auth/callback/google`;
+  return normalizedGoogleRedirect(process.env.GOOGLE_REDIRECT_URI);
 }
 
 export function googleCalendarRedirectUri() {
-  return process.env.GOOGLE_CALENDAR_REDIRECT_URI || googleRedirectUri();
+  return normalizedGoogleRedirect(process.env.GOOGLE_CALENDAR_REDIRECT_URI || googleRedirectUri());
 }
 
 export function sanitizeNext(value: unknown) {
