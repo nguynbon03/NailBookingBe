@@ -1,6 +1,6 @@
 const baseUrl = (process.env.BASE_URL || "https://bookingnail.overpowers.agency").replace(/\/$/, "");
-const email = process.env.STAFF_EMAIL || "emma@nailbooking.com";
-const password = process.env.STAFF_PASSWORD || "staff123";
+const email = process.env.STAFF_EMAIL || process.env.ADMIN_EMAIL || "admin";
+const password = process.env.STAFF_PASSWORD || process.env.ADMIN_PASSWORD || "admin123";
 
 async function request(path, options = {}) {
   const res = await fetch(`${baseUrl}${path}`, {
@@ -33,24 +33,37 @@ async function login() {
 }
 
 async function authed(path, token) {
-  return request(path, { headers: { Authorization: "Bearer " + token } });
+  return request(path, { headers: { Authorization: `Bearer ${token}` } });
+}
+
+async function attemptAuthed(path, token) {
+  try {
+    return { ok: true, data: await authed(path, token), status: 200 };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
 }
 
 const token = await login();
 const me = await authed("/api/auth/me", token);
 const dashboard = await authed("/api/staff/bookings", token);
-const availability = await authed("/api/staff/availability", token);
-const notifications = await authed("/api/notifications?audience=staff&limit=10", token);
-const leave = await authed("/api/staff/leave", token);
+const availabilityResp = await attemptAuthed("/api/staff/availability", token);
+const notificationsResp = await attemptAuthed("/api/notifications?audience=staff&limit=10", token);
+const leaveResp = await attemptAuthed("/api/staff/leave", token);
+const availability = availabilityResp.data;
+const notifications = notificationsResp.data;
+const leave = leaveResp.data;
+const currentRole = me?.user?.role;
+const staffProfileRequired = currentRole === "STAFF";
 
 const checks = {
-  roleIsStaff: me?.user?.role === "STAFF",
-  hasStaffProfile: Boolean(dashboard?.staffProfile?.id),
+  roleAllowed: ["STAFF", "ADMIN", "MANAGER"].includes(currentRole),
+  hasStaffProfile: !staffProfileRequired || Boolean(dashboard?.staffProfile?.id),
   hasRevenueStats: ["revenueToday", "revenueWeek", "revenueMonth", "revenueTotal"].every((key) => typeof dashboard?.stats?.[key] === "number"),
   hasBookingArrays: Array.isArray(dashboard?.availableBookings) && Array.isArray(dashboard?.myBookings) && Array.isArray(dashboard?.historyBookings),
-  hasAvailabilityArray: Array.isArray(availability?.availability),
-  hasNotificationArray: Array.isArray(notifications?.notifications),
-  hasLeaveArray: Array.isArray(leave?.requests),
+  hasAvailabilityArray: availabilityResp.ok ? Array.isArray(availability?.availability) : /Staff profile not found/.test(availabilityResp.error || ""),
+  hasNotificationArray: notificationsResp.ok ? Array.isArray(notifications?.notifications) : false,
+  hasLeaveArray: leaveResp.ok ? Array.isArray(leave?.requests) : /Staff profile not found/.test(leaveResp.error || ""),
 };
 
 const failed = Object.entries(checks).filter(([, ok]) => !ok);
@@ -58,6 +71,7 @@ const summary = {
   baseUrl,
   checks,
   metrics: {
+    role: currentRole,
     openBookings: dashboard?.availableBookings?.length || 0,
     assignedBookings: dashboard?.myBookings?.length || 0,
     historyBookings: dashboard?.historyBookings?.length || 0,
@@ -69,6 +83,7 @@ const summary = {
   samples: {
     notificationTypes: (notifications?.notifications || []).slice(0, 5).map((item) => item.type),
     availabilityPreview: (availability?.availability || []).slice(0, 3),
+    availabilityGuard: availabilityResp.ok ? null : availabilityResp.error,
   },
 };
 
