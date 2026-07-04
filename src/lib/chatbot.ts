@@ -3,7 +3,7 @@ import * as path from "path";
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
-import { retrieveKnowledge as retrieveKnowledgeRag } from "./chatbot-rag";
+import { retrieveKnowledgeTrace } from "./chatbot-rag";
 
 export type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
 export type RetrievedChunk = { source: string; text: string; score: number };
@@ -376,6 +376,10 @@ const ChatbotGraphState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => [],
   }),
+  knowledgeEngine: Annotation<"qdrant" | "lexical">({
+    reducer: (_left, right) => right,
+    default: () => "lexical",
+  }),
   soul: Annotation<string>({
     reducer: (_left, right) => right,
     default: () => "",
@@ -409,8 +413,8 @@ async function prepareNode(state: ChatbotGraphStateType) {
   const latestUser = [...messages].reverse().find((item) => item.role === "user")?.content?.trim() || "";
   if (!latestUser) throw new Error("missing_user_message");
 
-  const [chunks, soul] = await Promise.all([
-    retrieveKnowledgeRag(latestUser, state.mode, 6),
+  const [{ chunks, engine }, soul] = await Promise.all([
+    retrieveKnowledgeTrace(latestUser, state.mode, 6),
     fs.readFile(path.join(KNOWLEDGE_DIR, "SOUL.md"), "utf8").catch(() => ""),
   ]);
 
@@ -418,6 +422,7 @@ async function prepareNode(state: ChatbotGraphStateType) {
     messages,
     latestUser,
     chunks,
+    knowledgeEngine: engine,
     soul,
     sources: uniqueSources(chunks),
   };
@@ -539,5 +544,6 @@ export async function generateAssistantReply(options: {
     configured: Boolean(result.configured),
     answer: String(result.answer || "").trim(),
     sources: result.sources || [],
+    knowledgeEngine: result.knowledgeEngine || "lexical",
   };
 }

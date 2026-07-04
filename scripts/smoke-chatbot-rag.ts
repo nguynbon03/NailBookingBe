@@ -23,6 +23,7 @@ async function main() {
       preview: item.text.replace(/\s+/g, " ").slice(0, 180),
     })),
     answerPreview: reply.answer.slice(0, 500),
+    knowledgeEngine: reply.knowledgeEngine,
     sources: reply.sources,
   }, null, 2));
 }

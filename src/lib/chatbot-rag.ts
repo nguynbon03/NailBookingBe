@@ -333,21 +333,26 @@ async function qdrantRetrieve(query: string, mode: KnowledgeMode, limit: number)
   return diversify(reranked, limit);
 }
 
-export async function retrieveKnowledge(query: string, mode: KnowledgeMode, limit = DEFAULT_TOP_K) {
+export async function retrieveKnowledgeTrace(query: string, mode: KnowledgeMode, limit = DEFAULT_TOP_K) {
   const corpus = (await loadCorpus()).filter((item) => item.audiences.includes(mode));
-  if (!corpus.length) return [] as RetrievedChunk[];
+  if (!corpus.length) return { chunks: [] as RetrievedChunk[], engine: "lexical" as const };
 
   if (qdrantEnabled()) {
     try {
       await syncKnowledgeToQdrantInternal(await loadCorpus());
       const qdrantResults = await qdrantRetrieve(query, mode, limit);
-      if (qdrantResults.length) return qdrantResults;
+      if (qdrantResults.length) return { chunks: qdrantResults, engine: "qdrant" as const };
     } catch {
       // Fall back to lexical retrieval below.
     }
   }
 
-  return lexicalRetrieve(query, corpus, limit);
+  return { chunks: lexicalRetrieve(query, corpus, limit), engine: "lexical" as const };
+}
+
+export async function retrieveKnowledge(query: string, mode: KnowledgeMode, limit = DEFAULT_TOP_K) {
+  const result = await retrieveKnowledgeTrace(query, mode, limit);
+  return result.chunks;
 }
 
 export async function syncKnowledgeToQdrant(force = false) {
