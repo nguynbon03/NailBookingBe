@@ -151,6 +151,14 @@ export async function PUT(req: NextRequest) {
   if (!existing) return NextResponse.json({ error: "Leave request not found" }, { status: 404 });
 
   const managerNote = body.managerNote ? cleanText(body.managerNote, "") : null;
+  if (existing.status !== "PENDING") {
+    if (existing.status === status) {
+      await prisma.notification.deleteMany({ where: { audience: "ADMIN", entityType: "STAFF_LEAVE", entityId: existing.id } }).catch(() => null);
+      return NextResponse.json({ leaveRequest: serializeLeave(existing), affectedBookings: [], deduped: true, alreadyReviewed: true });
+    }
+    return NextResponse.json({ error: `This leave request was already reviewed as ${existing.status}` }, { status: 409 });
+  }
+
   const affectedBookings = status === "APPROVED"
     ? await prisma.booking.findMany({
         where: {
@@ -176,10 +184,23 @@ export async function PUT(req: NextRequest) {
       include: { staff: { select: { id: true, name: true, email: true, role: true } } },
     });
 
+    await tx.notification.deleteMany({ where: { audience: "ADMIN", entityType: "STAFF_LEAVE", entityId: existing.id } }).catch(() => null);
+    await tx.notification.deleteMany({
+      where: {
+        audience: "STAFF",
+        staffId: existing.staffId,
+        entityType: "STAFF_LEAVE",
+        entityId: existing.id,
+        type: { in: ["STAFF_LEAVE_APPROVED", "STAFF_LEAVE_REJECTED"] },
+      },
+    }).catch(() => null);
+
     await tx.notification.create({
       data: {
         audience: "STAFF",
         staffId: existing.staffId,
+        entityType: "STAFF_LEAVE",
+        entityId: existing.id,
         type: `STAFF_LEAVE_${status}`,
         title: status === "APPROVED" ? "Leave request approved" : "Leave request rejected",
         message: `${authUser.name || "Manager"} ${status.toLowerCase()} your leave from ${existing.startDate.toISOString().slice(0, 10)} to ${existing.endDate.toISOString().slice(0, 10)}.${managerNote ? ` Note: ${managerNote}` : ""}`,

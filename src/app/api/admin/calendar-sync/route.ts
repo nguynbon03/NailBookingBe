@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getAuthUser, isAdminRole } from "@/lib/auth";
 import { calcomConfigured } from "@/lib/calcom";
 import { defaultOwnerEmail, defaultOwnerPhone } from "@/lib/reporting";
-import { googleCalendarRedirectUri, googleClientId, googleClientSecret } from "@/lib/google-auth";
+import { googleAuthorizationUrl, googleCalendarRedirectUri, googleClientId, googleClientSecret } from "@/lib/google-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -57,15 +57,23 @@ function cleanNullable(value: unknown) {
   return text ? text : null;
 }
 
-function envStatus(req: NextRequest) {
+function envStatus(req: NextRequest, authUser?: { id: string; role: string }) {
   const base = publicBase(req);
   const googleConfigured = Boolean(googleClientId() && googleClientSecret());
   const smsConfigured = Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && (process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_FROM));
   const emailConfigured = Boolean((process.env.SMTP_HOST && (process.env.SMTP_FROM || process.env.FROM_EMAIL)) || (process.env.RESEND_API_KEY && process.env.FROM_EMAIL));
+  let connectUrl = `${base}/api/auth/google?calendar=1&next=${encodeURIComponent("/admin/google-sync")}`;
+  if (googleConfigured && authUser?.id) {
+    try {
+      connectUrl = googleAuthorizationUrl("/admin/google-sync", { calendar: true, actorUserId: authUser.id, actorRole: authUser.role }).toString();
+    } catch {
+      connectUrl = `${base}/api/auth/google?calendar=1&next=${encodeURIComponent("/admin/google-sync")}`;
+    }
+  }
   return {
     google: {
       configured: googleConfigured,
-      connectUrl: `${base}/api/auth/google?calendar=1&next=${encodeURIComponent("/admin/google-sync")}`,
+      connectUrl,
       redirectUri: googleCalendarRedirectUri(),
     },
     calcom: {
@@ -100,7 +108,7 @@ export async function GET(req: NextRequest) {
     (prisma as any).reportDeliveryLog.findMany({ orderBy: { createdAt: "desc" }, take: 12 }).catch(() => []),
   ]);
 
-  return NextResponse.json({ settings, env: envStatus(req), connections, logs, reportLogs });
+  return NextResponse.json({ settings, env: envStatus(req, authUser), connections, logs, reportLogs });
 }
 
 export async function PUT(req: NextRequest) {
@@ -132,5 +140,5 @@ export async function PUT(req: NextRequest) {
     },
   }).catch(() => null);
 
-  return NextResponse.json({ settings, env: envStatus(req) });
+  return NextResponse.json({ settings, env: envStatus(req, authUser) });
 }

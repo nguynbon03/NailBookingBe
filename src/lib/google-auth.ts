@@ -52,8 +52,20 @@ export function sanitizeNext(value: unknown) {
   return next;
 }
 
-export function createGoogleState(nextInput: unknown, calendar = false) {
-  const payload = base64url(JSON.stringify({ nonce: randomBytes(16).toString("hex"), next: sanitizeNext(nextInput), calendar, ts: Date.now() }));
+type GoogleStateOptions = {
+  actorUserId?: string | null;
+  actorRole?: string | null;
+};
+
+export function createGoogleState(nextInput: unknown, calendar = false, options: GoogleStateOptions = {}) {
+  const payload = base64url(JSON.stringify({
+    nonce: randomBytes(16).toString("hex"),
+    next: sanitizeNext(nextInput),
+    calendar,
+    actorUserId: options.actorUserId || null,
+    actorRole: options.actorRole || null,
+    ts: Date.now(),
+  }));
   return `${payload}.${signPayload(payload)}`;
 }
 
@@ -62,10 +74,15 @@ export function verifyGoogleState(state: unknown) {
   if (!payload || !signature || !safeCompare(signature, signPayload(payload))) throw new Error("invalid_state");
   const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   if (!parsed.ts || Date.now() - Number(parsed.ts) > STATE_TTL_MS) throw new Error("expired_state");
-  return { next: sanitizeNext(parsed.next), calendar: Boolean(parsed.calendar) };
+  return {
+    next: sanitizeNext(parsed.next),
+    calendar: Boolean(parsed.calendar),
+    actorUserId: parsed.actorUserId ? String(parsed.actorUserId) : null,
+    actorRole: parsed.actorRole ? String(parsed.actorRole) : null,
+  };
 }
 
-export function googleAuthorizationUrl(nextInput: unknown, options: { calendar?: boolean } = {}) {
+export function googleAuthorizationUrl(nextInput: unknown, options: { calendar?: boolean; actorUserId?: string | null; actorRole?: string | null } = {}) {
   const clientId = googleClientId();
   if (!clientId) throw new Error("missing_google_client_id");
   const calendar = Boolean(options.calendar);
@@ -74,7 +91,7 @@ export function googleAuthorizationUrl(nextInput: unknown, options: { calendar?:
   url.searchParams.set("redirect_uri", calendar ? googleCalendarRedirectUri() : googleRedirectUri());
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", calendar ? "openid email profile https://www.googleapis.com/auth/calendar.events" : "openid email profile");
-  url.searchParams.set("state", createGoogleState(nextInput, calendar));
+  url.searchParams.set("state", createGoogleState(nextInput, calendar, { actorUserId: options.actorUserId, actorRole: options.actorRole }));
   url.searchParams.set("prompt", calendar ? "consent" : "select_account");
   if (calendar) {
     url.searchParams.set("access_type", "offline");
@@ -140,4 +157,12 @@ export async function createAppSessionFromGooglePayload(payload: TokenPayload) {
 export function googleCallbackHtml(token: string, next: string) {
   const safeNext = sanitizeNext(next);
   return `<!doctype html><html><head><meta charset="utf-8"><title>Signing in...</title></head><body><p>Signing in with Google...</p><script>localStorage.setItem("token", ${JSON.stringify(token)}); window.location.replace(${JSON.stringify(safeNext)});</script></body></html>`;
+}
+
+export function googleCalendarCallbackHtml(next: string, params: Record<string, string>) {
+  const url = new URL(sanitizeNext(next), "https://bookingnail.local");
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) url.searchParams.set(key, value);
+  });
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Connecting calendar...</title></head><body><p>Returning to admin...</p><script>window.location.replace(${JSON.stringify(`${url.pathname}${url.search}`)});</script></body></html>`;
 }

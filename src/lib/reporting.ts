@@ -206,7 +206,16 @@ export async function buildRevenueReport(prisma: PrismaLike, periodParam?: strin
   const bankMatchedTotal = bankCredits.filter((entry: any) => entry.matchedBookingId).reduce((sum: number, entry: any) => sum + Number(entry.amount || 0), 0);
 
   const serviceTotals = new Map<string, { service: string; count: number; revenue: number }>();
+  const staffTotals = new Map<string, { staff: string; bookingCount: number; completedCount: number; confirmedCount: number; revenue: number }>();
   for (const booking of revenueBookings) {
+    const staffName = staffText(booking);
+    const staffRow = staffTotals.get(staffName) || { staff: staffName, bookingCount: 0, completedCount: 0, confirmedCount: 0, revenue: 0 };
+    staffRow.bookingCount += 1;
+    if (booking.status === "COMPLETED") staffRow.completedCount += 1;
+    if (booking.status === "CONFIRMED") staffRow.confirmedCount += 1;
+    staffRow.revenue += Number(booking.totalPrice || 0);
+    staffTotals.set(staffName, staffRow);
+
     const names = (booking.services || []).map((item: any) => item.service?.name).filter(Boolean);
     for (const name of names.length ? names : ["Service"]) {
       const row = serviceTotals.get(name) || { service: name, count: 0, revenue: 0 };
@@ -237,6 +246,9 @@ export async function buildRevenueReport(prisma: PrismaLike, periodParam?: strin
       bankStatementUnmatchedCount: bankCredits.filter((entry: any) => !entry.matchedBookingId).length,
       bankStatementEntryCount: bankEntries.length,
     },
+    staffTotals: Array.from(staffTotals.values())
+      .map((row) => ({ ...row, revenue: numberMoney(row.revenue) }))
+      .sort((a, b) => b.revenue - a.revenue || b.bookingCount - a.bookingCount),
     serviceTotals: Array.from(serviceTotals.values()).map((row) => ({ ...row, revenue: numberMoney(row.revenue) })).sort((a, b) => b.revenue - a.revenue),
     bankEntries: bankEntries.map((entry: any) => ({
       id: entry.id,
@@ -372,6 +384,9 @@ export function revenueReportPdf(report: Awaited<ReturnType<typeof buildRevenueR
     `Discount total: ${money(report.summary.discountTotal)} | Expected deposits: ${money(report.summary.expectedDeposits)}`,
     `Bank transfer/payment confirmed count: ${report.summary.bankTransferConfirmed}`,
     `Bank statement credits: ${money(report.summary.bankStatementCreditTotal)} | debits: ${money(report.summary.bankStatementDebitTotal)} | matched: ${money(report.summary.bankStatementMatchedTotal)} | unmatched credits: ${report.summary.bankStatementUnmatchedCount}`,
+    "",
+    "Staff revenue:",
+    ...(report.staffTotals.length ? report.staffTotals.map((s: any) => `- ${s.staff}: ${money(s.revenue)} from ${s.bookingCount} booking(s) [completed ${s.completedCount}, confirmed ${s.confirmedCount}]`) : ["- No staff revenue in this period"]),
     "",
     "Top services:",
     ...(report.serviceTotals.length ? report.serviceTotals.map((s: any) => `- ${s.service}: ${s.count} booking(s), ${money(s.revenue)}`) : ["- No service revenue in this period"]),

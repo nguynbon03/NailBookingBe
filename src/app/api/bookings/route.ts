@@ -10,6 +10,7 @@ import { createVerificationToken, isValidEmail, normalizeEmail } from "@/lib/ema
 import { bookingReference, paymentTransferUrl } from "@/lib/payment-locks";
 import { assessBookingProtection } from "@/lib/booking-protection";
 import { syncBookingToCalCom, cancelCalComBooking } from "@/lib/calcom";
+import { syncBookingToGoogleCalendar, cancelGoogleCalendarBooking } from "@/lib/google-calendar";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -304,7 +305,8 @@ export async function PUT(req: NextRequest) {
 
   await deliverPendingCustomerNotifications(prisma, booking.id);
   const calcomSync = status === "CANCELLED" ? await cancelCalComBooking(prisma, booking as any) : await syncBookingToCalCom(prisma, booking as any);
-  return NextResponse.json({ booking: serializeBooking(booking), calcomSync });
+  const googleSync = status === "CANCELLED" ? await cancelGoogleCalendarBooking(prisma, booking as any) : await syncBookingToGoogleCalendar(prisma, booking as any);
+  return NextResponse.json({ booking: serializeBooking(booking), calcomSync, googleSync });
 }
 
 export async function DELETE(req: NextRequest) {

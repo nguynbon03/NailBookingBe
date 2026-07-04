@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import {
   createAppSessionFromGooglePayload,
   exchangeGoogleCode,
+  googleCalendarCallbackHtml,
   googleCallbackHtml,
   verifyGoogleIdToken,
   verifyGoogleState,
@@ -20,10 +21,15 @@ export async function GET(req: NextRequest) {
   if (!code || !state) return NextResponse.redirect(new URL("/login?google_error=missing_code", req.nextUrl.origin));
 
   try {
-    const { next, calendar } = verifyGoogleState(state);
+    const { next, calendar, actorUserId } = verifyGoogleState(state);
     const googleToken = await exchangeGoogleCode(code, { calendar });
     const payload = await verifyGoogleIdToken(googleToken.id_token);
-    const { user, token } = await createAppSessionFromGooglePayload(payload);
+    const session = actorUserId
+      ? await prisma.user.findUnique({ where: { id: actorUserId }, select: { id: true, email: true, name: true, role: true } })
+      : null;
+    const { user, token } = session
+      ? { user: session, token: null }
+      : await createAppSessionFromGooglePayload(payload);
     if (calendar) {
       const staff = await prisma.staff.findFirst({ where: { email: user.email }, select: { id: true } });
       const existing = await (prisma as any).googleCalendarConnection.findUnique({ where: { userId_calendarId: { userId: user.id, calendarId: "primary" } } }).catch(() => null);
@@ -50,8 +56,25 @@ export async function GET(req: NextRequest) {
       }).catch(async (err: Error) => {
         await (prisma as any).calendarSyncLog.create({ data: { direction: "OAUTH", status: "FAILED", message: err.message.slice(0, 500), staffId: staff?.id || null } }).catch(() => null);
       });
+
+      await (prisma as any).calendarSyncSetting.upsert({
+        where: { id: "default" },
+        update: { ownerEmail: payload.email || user.email || undefined },
+        create: { id: "default", ownerEmail: payload.email || user.email || "" },
+      }).catch(() => null);
+
+      return new NextResponse(googleCalendarCallbackHtml(next, {
+        google_calendar: "connected",
+        google_email: payload.email || user.email,
+      }), {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+        },
+      });
     }
-    return new NextResponse(googleCallbackHtml(token, next), {
+
+    return new NextResponse(googleCallbackHtml(String(token || ""), next), {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",

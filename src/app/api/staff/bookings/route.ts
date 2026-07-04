@@ -8,6 +8,7 @@ import { notifyBookingStatusChanged } from "@/lib/notifications";
 import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
 import { queueOwnerBookingEmail, queueStaffBookingEmail } from "@/lib/internal-notifications";
 import { syncBookingToCalCom } from "@/lib/calcom";
+import { syncBookingToGoogleCalendar } from "@/lib/google-calendar";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -96,14 +97,45 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ staffProfile, historyBookings: historyBookings.map(serializeBooking) });
   }
 
-  const [availableBookings, myBookings, historyBookings, completedToday] = await Promise.all([
+  const now = new Date();
+  const startToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const dayOfWeek = startToday.getUTCDay();
+  const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const startOfWeek = new Date(startToday);
+  startOfWeek.setUTCDate(startOfWeek.getUTCDate() - mondayOffset);
+  const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+  const [availableBookings, myBookings, historyBookings, completedToday, revenueRows] = await Promise.all([
     prisma.booking.findMany({ where: availableWhere, include: bookingInclude, orderBy: [{ date: "asc" }, { time: "asc" }] }),
     prisma.booking.findMany({ where: mineWhere, include: bookingInclude, orderBy: [{ date: "asc" }, { time: "asc" }] }),
     prisma.booking.findMany({ where: historyWhere, include: bookingInclude, orderBy: [{ date: "desc" }, { time: "desc" }, { updatedAt: "desc" }], take: 80 }),
     staffProfile
       ? prisma.booking.count({ where: { staffId: staffProfile.id, status: "COMPLETED", archivedAt: null } })
       : prisma.booking.count({ where: { status: "COMPLETED", archivedAt: null } }),
+    prisma.booking.findMany({
+      where: {
+        ...(staffProfile ? { staffId: staffProfile.id } : {}),
+        status: "COMPLETED",
+        archivedAt: null,
+      },
+      select: { date: true, totalPrice: true },
+    }),
   ]);
+
+  const revenueStats = revenueRows.reduce(
+    (acc, row) => {
+      const bookingDate = new Date(row.date);
+      if (Number.isNaN(bookingDate.getTime())) return acc;
+      const normalized = new Date(Date.UTC(bookingDate.getUTCFullYear(), bookingDate.getUTCMonth(), bookingDate.getUTCDate()));
+      const amount = Number(row.totalPrice || 0);
+      acc.total += amount;
+      if (normalized >= startToday) acc.today += amount;
+      if (normalized >= startOfWeek) acc.week += amount;
+      if (normalized >= startOfMonth) acc.month += amount;
+      return acc;
+    },
+    { today: 0, week: 0, month: 0, total: 0 },
+  );
 
   return NextResponse.json({
     staffProfile,
@@ -115,6 +147,10 @@ export async function GET(req: NextRequest) {
       assigned: myBookings.length,
       history: historyBookings.length,
       completed: completedToday,
+      revenueToday: Math.round(revenueStats.today * 100) / 100,
+      revenueWeek: Math.round(revenueStats.week * 100) / 100,
+      revenueMonth: Math.round(revenueStats.month * 100) / 100,
+      revenueTotal: Math.round(revenueStats.total * 100) / 100,
     },
   });
 }
@@ -183,7 +219,8 @@ export async function PUT(req: NextRequest) {
     });
     await deliverPendingCustomerNotifications(prisma, booking.id);
     const calcomSync = await syncBookingToCalCom(prisma, booking as any);
-    return NextResponse.json({ booking: serializeBooking(booking), calcomSync });
+    const googleSync = await syncBookingToGoogleCalendar(prisma, booking as any);
+    return NextResponse.json({ booking: serializeBooking(booking), calcomSync, googleSync });
   }
 
   if (action === "reject") {
@@ -219,7 +256,9 @@ export async function PUT(req: NextRequest) {
       return updated;
     });
     await deliverPendingCustomerNotifications(prisma, booking.id);
-    return NextResponse.json({ booking: serializeBooking(booking) });
+    const calcomSync = await syncBookingToCalCom(prisma, booking as any);
+    const googleSync = await syncBookingToGoogleCalendar(prisma, booking as any);
+    return NextResponse.json({ booking: serializeBooking(booking), calcomSync, googleSync });
   }
 
   const actionToStatus: Record<string, BookingStatus> = {

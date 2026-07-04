@@ -5,6 +5,9 @@ import { getAuthUser, isAdminRole } from "@/lib/auth";
 import { bookingInclude, serializeBooking, updateBookingStatusWithRevenue } from "@/lib/booking-workflow";
 import { notifyBookingStatusChanged } from "@/lib/notifications";
 import { deliverPendingCustomerNotifications } from "@/lib/customer-notifications";
+import { queueOwnerLeaveEmail, queueStaffLeaveEmail } from "@/lib/internal-notifications";
+import { cancelCalComBooking } from "@/lib/calcom";
+import { cancelGoogleCalendarBooking } from "@/lib/google-calendar";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -36,7 +39,6 @@ async function findLeaveRequest(notification: any) {
   return prisma.staffLeaveRequest.findFirst({
     where: {
       staffId: notification.staffId || undefined,
-      status: "PENDING",
       ...(dates ? { startDate: dates.startDate, endDate: dates.endDate } : {}),
     },
     include: { staff: true },
@@ -46,7 +48,13 @@ async function findLeaveRequest(notification: any) {
 
 async function reviewLeave(notification: any, status: "APPROVED" | "REJECTED", managerName: string, managerNote: string | null) {
   const existing = await findLeaveRequest(notification);
-  if (!existing) throw new Error("Pending leave request not found for this inbox ticket");
+  if (!existing) throw new Error("Leave request not found for this inbox ticket");
+
+  if (existing.status !== "PENDING") {
+    await prisma.notification.deleteMany({ where: { audience: "ADMIN", entityType: "STAFF_LEAVE", entityId: existing.id } }).catch(() => null);
+    await prisma.notification.deleteMany({ where: { id: notification.id } }).catch(() => null);
+    return { leaveRequest: existing, affectedBookings: [], alreadyReviewed: true };
+  }
 
   const affectedBookings = status === "APPROVED"
     ? await prisma.booking.findMany({
@@ -73,7 +81,17 @@ async function reviewLeave(notification: any, status: "APPROVED" | "REJECTED", m
       include: { staff: { select: { id: true, name: true, email: true, role: true } } },
     });
 
-    await tx.notification.update({ where: { id: notification.id }, data: { read: true, entityType: "STAFF_LEAVE", entityId: existing.id } });
+    await tx.notification.deleteMany({ where: { audience: "ADMIN", entityType: "STAFF_LEAVE", entityId: existing.id } }).catch(() => null);
+    await tx.notification.deleteMany({ where: { id: notification.id } }).catch(() => null);
+    await tx.notification.deleteMany({
+      where: {
+        audience: "STAFF",
+        staffId: existing.staffId,
+        entityType: "STAFF_LEAVE",
+        entityId: existing.id,
+        type: { in: ["STAFF_LEAVE_APPROVED", "STAFF_LEAVE_REJECTED"] },
+      },
+    }).catch(() => null);
 
     await tx.notification.create({
       data: {
@@ -87,9 +105,32 @@ async function reviewLeave(notification: any, status: "APPROVED" | "REJECTED", m
       },
     });
 
+    if (status === "APPROVED" && affectedBookings.length > 0) {
+      await tx.notification.create({
+        data: {
+          audience: "ADMIN",
+          staffId: existing.staffId,
+          entityType: "STAFF_LEAVE",
+          entityId: existing.id,
+          type: "APPROVED_LEAVE_HAS_BOOKING_CONFLICTS",
+          title: "Approved leave has assigned bookings",
+          message: `${existing.staff.name} has ${affectedBookings.length} confirmed booking(s) during approved leave. Reassign them before the appointment time.`,
+        },
+      });
+    }
+
+    await queueStaffLeaveEmail(tx, updated, status === "APPROVED" ? "Leave request approved" : "Leave request rejected", managerNote || "");
+    await queueOwnerLeaveEmail(
+      tx,
+      updated,
+      status === "APPROVED" ? "Leave request approved" : "Leave request rejected",
+      affectedBookings.length ? `${affectedBookings.length} assigned booking(s) overlap this approved leave. Reassign them.` : "Staff has been notified by website notification and email.",
+    );
+
     return updated;
   });
 
+  await deliverPendingCustomerNotifications(prisma, null, "internal_staff_leave_alert");
   return { leaveRequest, affectedBookings };
 }
 
@@ -99,7 +140,7 @@ async function approveCancellation(notification: any, managerName: string) {
   if (!target) throw new Error("Booking not found for this cancellation ticket");
 
   if (target.status === "CANCELLED") {
-    await prisma.notification.update({ where: { id: notification.id }, data: { read: true } });
+    await prisma.notification.deleteMany({ where: { id: notification.id } }).catch(() => null);
     return { booking: target, alreadyCancelled: true };
   }
   if (["COMPLETED", "NO_SHOW"].includes(target.status)) {
@@ -112,22 +153,35 @@ async function approveCancellation(notification: any, managerName: string) {
       notes: appendNote(target.notes, `[Inbox ${new Date().toISOString()}] Customer cancellation approved by ${managerName}.`),
     });
     await notifyBookingStatusChanged(tx, updated, managerName);
-    await tx.notification.update({ where: { id: notification.id }, data: { read: true } });
+    await tx.notification.delete({ where: { id: notification.id } }).catch(() => null);
     return updated;
   });
 
   await deliverPendingCustomerNotifications(prisma, booking.id);
-  return { booking };
+  const calcomSync = await cancelCalComBooking(prisma, booking as any);
+  const googleSync = await cancelGoogleCalendarBooking(prisma, booking as any);
+  return { booking, calcomSync, googleSync };
 }
 
 async function keepBooking(notification: any, managerName: string) {
   if (notification.bookingId) {
     await prisma.booking.update({
       where: { id: notification.bookingId },
-      data: { notes: { set: appendNote((await prisma.booking.findUnique({ where: { id: notification.bookingId }, select: { notes: true } }))?.notes, `[Inbox ${new Date().toISOString()}] Cancellation request reviewed by ${managerName}; booking kept active.`) } },
+      data: {
+        notes: {
+          set: appendNote(
+            (await prisma.booking.findUnique({ where: { id: notification.bookingId }, select: { notes: true } }))?.notes,
+            `[Inbox ${new Date().toISOString()}] Cancellation request reviewed by ${managerName}; booking kept active.`,
+          ),
+        },
+      },
     });
   }
-  await prisma.notification.update({ where: { id: notification.id }, data: { read: true } });
+  await prisma.notification.deleteMany({ where: { id: notification.id } }).catch(() => null);
+}
+
+async function acknowledge(notification: any) {
+  await prisma.notification.deleteMany({ where: { id: notification.id } }).catch(() => null);
 }
 
 export async function POST(req: NextRequest) {
@@ -148,7 +202,14 @@ export async function POST(req: NextRequest) {
   try {
     if (action === "approveCancellation") {
       const result = await approveCancellation(notification, managerName);
-      return NextResponse.json({ ok: true, action, booking: serializeBooking(result.booking), alreadyCancelled: Boolean(result.alreadyCancelled) });
+      return NextResponse.json({
+        ok: true,
+        action,
+        booking: serializeBooking(result.booking),
+        alreadyCancelled: Boolean(result.alreadyCancelled),
+        calcomSync: (result as any).calcomSync || null,
+        googleSync: (result as any).googleSync || null,
+      });
     }
     if (action === "keepBooking") {
       await keepBooking(notification, managerName);
@@ -157,10 +218,10 @@ export async function POST(req: NextRequest) {
     if (action === "approveLeave" || action === "rejectLeave") {
       const status = action === "approveLeave" ? "APPROVED" : "REJECTED";
       const result = await reviewLeave(notification, status, managerName, managerNote);
-      return NextResponse.json({ ok: true, action, leaveRequest: result.leaveRequest, affectedBookings: result.affectedBookings });
+      return NextResponse.json({ ok: true, action, leaveRequest: result.leaveRequest, affectedBookings: result.affectedBookings, alreadyReviewed: Boolean((result as any).alreadyReviewed) });
     }
     if (action === "acknowledge") {
-      await prisma.notification.update({ where: { id: notification.id }, data: { read: true } });
+      await acknowledge(notification);
       return NextResponse.json({ ok: true, action });
     }
     return NextResponse.json({ error: "Unsupported inbox action" }, { status: 400 });

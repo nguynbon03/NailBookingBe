@@ -49,6 +49,27 @@ function payload(data: any, staffId: string) {
   };
 }
 
+function normalizeReplaceWeekSlots(items: any[], staffId: string) {
+  const normalized = items.map((item) => payload(item, staffId));
+  const byDate = new Map<string, { startTime: string; endTime: string }[]>();
+  for (const item of normalized) {
+    if (!item.date) throw new Error("Weekly slots must use specific dates");
+    const key = item.date.toISOString().slice(0, 10);
+    const bucket = byDate.get(key) || [];
+    bucket.push({ startTime: item.startTime, endTime: item.endTime });
+    byDate.set(key, bucket);
+  }
+  for (const ranges of byDate.values()) {
+    const ordered = ranges.slice().sort((a, b) => minutes(a.startTime) - minutes(b.startTime));
+    for (let index = 1; index < ordered.length; index += 1) {
+      if (minutes(ordered[index].startTime) < minutes(ordered[index - 1].endTime)) {
+        throw new Error("Time slots on the same day cannot overlap");
+      }
+    }
+  }
+  return normalized;
+}
+
 export async function GET(req: NextRequest) {
   const authUser = await getAuthUser(req);
   if (!authUser || !isStaffPortalRole(authUser.role)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -72,6 +93,32 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   try {
+    if (body?.replaceWeek === true) {
+      const weekStart = String(body.weekStart || "").trim();
+      const weekEnd = String(body.weekEnd || "").trim();
+      if (!weekStart || !weekEnd) throw new Error("Week start and week end are required");
+      const slots = normalizeReplaceWeekSlots(Array.isArray(body.slots) ? body.slots : [], staffId);
+      const start = dateOnly(weekStart);
+      const end = dateOnly(weekEnd);
+      await prisma.$transaction(async (tx) => {
+        await tx.staffAvailability.deleteMany({
+          where: {
+            staffId,
+            createdBySource: STAFF_SOURCE,
+            date: { gte: start, lte: end },
+          },
+        });
+        if (slots.length) {
+          await tx.staffAvailability.createMany({ data: slots });
+        }
+      });
+      const availability = await prisma.staffAvailability.findMany({
+        where: { staffId, createdBySource: STAFF_SOURCE },
+        orderBy: [{ date: "asc" }, { dayOfWeek: "asc" }, { startTime: "asc" }],
+      });
+      return NextResponse.json({ availability, replacedWeek: true });
+    }
+
     const next = payload(body, staffId);
     const existing = await prisma.staffAvailability.findFirst({
       where: {

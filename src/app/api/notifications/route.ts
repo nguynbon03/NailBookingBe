@@ -31,6 +31,10 @@ async function notificationScope(req: NextRequest, authUser: any) {
   const audience = req.nextUrl.searchParams.get("audience");
   const where: any = {};
 
+  if (audience === "customer") {
+    return { audience: "CUSTOMER", userId: authUser.id };
+  }
+
   if (audience === "staff" || authUser.role === "STAFF") {
     const staffId = await resolveStaffId(authUser.email);
     return staffOnlyScope(staffId);
@@ -41,17 +45,21 @@ async function notificationScope(req: NextRequest, authUser: any) {
     return where;
   }
 
+  where.audience = "CUSTOMER";
   where.userId = authUser.id;
   return where;
 }
 
 async function scopedWhereFromBody(req: NextRequest, authUser: any, body: any) {
+  if (body?.audience === "customer") {
+    return { audience: "CUSTOMER", userId: authUser.id };
+  }
   if (body?.audience === "staff" || authUser.role === "STAFF") {
     const staffId = await resolveStaffId(authUser.email);
     return staffOnlyScope(staffId);
   }
   if (isAdminRole(authUser.role)) return { audience: "ADMIN" };
-  return { userId: authUser.id };
+  return { audience: "CUSTOMER", userId: authUser.id };
 }
 
 export async function GET(req: NextRequest) {
