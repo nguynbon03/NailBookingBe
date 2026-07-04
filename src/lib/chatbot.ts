@@ -90,6 +90,12 @@ function sourceBoost(query: string, source: string, text: string) {
   if (/(photo|image|nail|bleeding|swelling|infection|lift|lifting|pain)/.test(q) && sourceName.includes("photo-guidance")) {
     boost += 6;
   }
+  if (/(choose|which|difference|compare|builder|biab|acrylic|gel|ombre|extensions|natural nail|overlay)/.test(q) && sourceName.includes("service-guidance")) {
+    boost += 6;
+  }
+  if (/(faq|first time|what should i|what do i need|how do i|book|booking|photo|price|duration)/.test(q) && sourceName.includes("customer-faq")) {
+    boost += 5;
+  }
   if (/(revenue|staff|leave|availability|workload|schedule|operations|unassigned|queue)/.test(q) && sourceName.includes("internal-ops")) {
     boost += 5;
   }
@@ -106,8 +112,18 @@ function sourceBoost(query: string, source: string, text: string) {
   return boost;
 }
 
-export async function retrieveKnowledge(query: string, limit = 6) {
-  const corpus = await loadCorpus();
+function sourceAudience(source: string): ChatbotMode[] {
+  const sourceName = source.toLowerCase();
+
+  if (sourceName.includes("internal-ops")) {
+    return ["admin", "staff"];
+  }
+
+  return ["customer", "staff", "admin"];
+}
+
+export async function retrieveKnowledge(query: string, mode: ChatbotMode, limit = 6) {
+  const corpus = (await loadCorpus()).filter((item) => sourceAudience(item.source).includes(mode));
   const q = words(query);
   const scored = corpus
     .map((item) => {
@@ -393,7 +409,7 @@ async function prepareNode(state: ChatbotGraphStateType) {
   if (!latestUser) throw new Error("missing_user_message");
 
   const [chunks, soul] = await Promise.all([
-    retrieveKnowledge(latestUser, 6),
+    retrieveKnowledge(latestUser, state.mode, 6),
     fs.readFile(path.join(KNOWLEDGE_DIR, "SOUL.md"), "utf8").catch(() => ""),
   ]);
 
