@@ -200,7 +200,7 @@ export async function POST(req: NextRequest) {
         depositAmount: protection.depositAmount,
         depositReasons: protection.reasons,
         instructions: protection.depositRequired
-          ? "This booking needs a deposit before staff assignment. Open the secure deposit link sent by email and use the booking reference when transferring."
+          ? "This booking needs a deposit before staff assignment. Open the secure deposit link sent by email and WhatsApp when available, then use the booking reference when transferring."
           : "Your booking request has been sent to staff. A staff member will accept/confirm it if they can take this slot.",
       },
       notificationDelivery,
