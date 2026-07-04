@@ -194,7 +194,26 @@ function hasSmsProvider() {
 }
 
 function validPhone(phone: string) {
-  return /^\+?[0-9][0-9\s().-]{6,}$/.test(phone) && !phone.includes("*");
+  return Boolean(normalizeDeliveryPhone(phone));
+}
+
+function normalizeDeliveryPhone(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.includes("*")) return "";
+  const normalized = raw.replace(/[\s().-]+/g, "").replace(/^00/, "+");
+  const digits = normalized.replace(/\D/g, "");
+  if (!digits) return "";
+
+  if (normalized.startsWith("+")) return `+${digits}`;
+  if (digits.startsWith("44") && digits.length >= 11 && digits.length <= 12) return `+${digits}`;
+  if (digits.startsWith("84") && digits.length >= 10 && digits.length <= 12) return `+${digits}`;
+
+  if (digits.startsWith("0")) {
+    if (digits.length === 11) return `+44${digits.slice(1)}`;
+    if (digits.length === 10) return `+84${digits.slice(1)}`;
+  }
+
+  return digits.length >= 8 && digits.length <= 15 ? `+${digits}` : "";
 }
 
 export async function queueCustomerBookingNotification(tx: PrismaTx, booking: CustomerBooking, event: CustomerEvent) {
@@ -327,10 +346,11 @@ async function sendEmail(row: any) {
 
 async function sendSms(row: any) {
   if (!hasSmsProvider()) throw new Error("SMS provider not configured: set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER");
-  if (!validPhone(row.recipient)) throw new Error("Invalid SMS recipient phone number");
+  const phone = normalizeDeliveryPhone(row.recipient);
+  if (!phone) throw new Error("Invalid SMS recipient phone number");
   const sid = process.env.TWILIO_ACCOUNT_SID!;
   const token = process.env.TWILIO_AUTH_TOKEN!;
-  const body = new URLSearchParams({ To: row.recipient, From: process.env.TWILIO_FROM_NUMBER!, Body: row.message });
+  const body = new URLSearchParams({ To: phone, From: process.env.TWILIO_FROM_NUMBER!, Body: row.message });
   const headers: Record<string, string> = { "Content-Type": "application/x-www-form-urlencoded" };
   headers.Authorization = String.fromCharCode(66, 97, 115, 105, 99) + " " + Buffer.from(`${sid}:${token}`).toString("base64");
   const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
@@ -399,8 +419,8 @@ async function sendWhatsApp(row: any) {
   if (!baseUrl || !apiKey || !instance) {
     throw new Error("WhatsApp provider not configured: set EVOLUTION_API_BASE_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME");
   }
-  const phone = String(row.recipient || "").replace(/[^0-9+]/g, "");
-  if (!/^\+?[0-9]{8,15}$/.test(phone)) throw new Error("Invalid WhatsApp recipient phone number");
+  const phone = normalizeDeliveryPhone(row.recipient);
+  if (!phone) throw new Error("Invalid WhatsApp recipient phone number");
 
   const text = `${row.subject ? row.subject + "\n\n" : ""}${row.message}`;
   const response = await fetch(`${baseUrl}/message/sendText/${encodeURIComponent(instance)}`, {
