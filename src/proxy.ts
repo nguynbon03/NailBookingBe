@@ -43,7 +43,7 @@ async function verifyAdminToken(req: NextRequest) {
   }
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const origin = req.headers.get("origin");
 
   if (req.method === "OPTIONS") {
