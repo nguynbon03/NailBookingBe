@@ -34,7 +34,16 @@ export function googleClientSecret() {
 function normalizedGoogleRedirect(value?: string) {
   const fallback = `${publicAppUrl()}/api/auth/callback/google`;
   const raw = String(value || "").trim() || fallback;
-  return raw.replace("/api/google-calendar/callback", "/api/auth/callback/google");
+  const normalized = raw.replace("/api/google-calendar/callback", "/api/auth/callback/google");
+  try {
+    const url = new URL(normalized);
+    if (url.hostname === "bookingnail.overpowers.agency" && url.protocol !== "https:") {
+      url.protocol = "https:";
+    }
+    return url.toString();
+  } catch {
+    return normalized;
+  }
 }
 
 export function googleRedirectUri() {
@@ -90,7 +99,7 @@ export function googleAuthorizationUrl(nextInput: unknown, options: { calendar?:
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", calendar ? googleCalendarRedirectUri() : googleRedirectUri());
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", calendar ? "openid email profile https://www.googleapis.com/auth/calendar.events" : "openid email profile");
+  url.searchParams.set("scope", calendar ? "openid email profile https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events" : "openid email profile");
   url.searchParams.set("state", createGoogleState(nextInput, calendar, { actorUserId: options.actorUserId, actorRole: options.actorRole }));
   url.searchParams.set("prompt", calendar ? "consent" : "select_account");
   if (calendar) {

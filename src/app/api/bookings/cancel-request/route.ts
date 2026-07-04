@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
     return saved;
   });
 
-  if (shouldAutoCancel) await deliverPendingCustomerNotifications(prisma, updated.id);
+  await deliverPendingCustomerNotifications(prisma, updated.id);
 
   return NextResponse.json({
     booking: serializeBooking(updated),

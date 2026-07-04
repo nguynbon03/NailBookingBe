@@ -411,6 +411,22 @@ async function main() {
   await prisma.$executeRawUnsafe(`
     CREATE INDEX IF NOT EXISTS "GoogleCalendarConnection_email_idx" ON "GoogleCalendarConnection" ("email");
   `);
+  const googleConnectionColumns: Array<[string, string]> = [
+    ["watchChannelId", "TEXT"],
+    ["watchResourceId", "TEXT"],
+    ["watchExpiration", "TIMESTAMP(3)"],
+    ["syncToken", "TEXT"],
+    ["lastWebhookAt", "TIMESTAMP(3)"],
+  ];
+  for (const [column, type] of googleConnectionColumns) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "GoogleCalendarConnection" ADD COLUMN IF NOT EXISTS "${column}" ${type};`);
+  }
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "GoogleCalendarConnection_watchChannelId_idx" ON "GoogleCalendarConnection" ("watchChannelId");
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "GoogleCalendarConnection_watchResourceId_idx" ON "GoogleCalendarConnection" ("watchResourceId");
+  `);
 
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "CalendarSyncLog" (

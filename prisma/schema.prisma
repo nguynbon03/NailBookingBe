@@ -278,6 +278,11 @@ model GoogleCalendarConnection {
   scope        String?
   calendarId   String    @default("primary")
   syncEnabled  Boolean   @default(true)
+  watchChannelId String?
+  watchResourceId String?
+  watchExpiration DateTime?
+  syncToken      String?
+  lastWebhookAt  DateTime?
   lastSyncAt   DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -285,6 +290,8 @@ model GoogleCalendarConnection {
   @@unique([userId, calendarId])
   @@index([staffId])
   @@index([email])
+  @@index([watchChannelId])
+  @@index([watchResourceId])
 }
 
 model CalendarSyncLog {

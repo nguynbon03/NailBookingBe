@@ -19,7 +19,7 @@ type CustomerBooking = {
   services?: { service?: { name?: string | null } | null }[];
 };
 
-type CustomerEvent = "booking_created" | "booking_confirmed" | "booking_cancelled" | "booking_no_show" | "booking_email_verification" | "account_verification" | "payment_transfer_link" | "daily_revenue_report" | "monthly_revenue_report" | "internal_owner_booking_alert" | "internal_staff_booking_alert" | "internal_staff_leave_alert";
+type CustomerEvent = "booking_created" | "booking_confirmed" | "booking_rescheduled" | "booking_cancelled" | "booking_no_show" | "booking_email_verification" | "account_verification" | "payment_transfer_link" | "daily_revenue_report" | "monthly_revenue_report" | "internal_owner_booking_alert" | "internal_staff_booking_alert" | "internal_staff_leave_alert";
 
 const SHOP_NAME = process.env.SHOP_NAME || "The Nail Lounge @ Stokesley";
 const PUBLIC_BOOKING_URL = process.env.PUBLIC_BOOKING_URL || "https://bookingnail.overpowers.agency/my-bookings";
@@ -153,6 +153,13 @@ function composeCustomerMessage(booking: CustomerBooking, event: CustomerEvent) 
     return {
       subject: `${SHOP_NAME}: booking confirmed (${ref})`,
       message: `Hi ${booking.customerName}, your booking for ${service} on ${when} is confirmed. Reference: ${ref}. Amount: ${money(booking.totalPrice)}. We look forward to seeing you at ${SHOP_NAME}.`,
+    };
+  }
+
+  if (event === "booking_rescheduled") {
+    return {
+      subject: `${SHOP_NAME}: booking rescheduled (${ref})`,
+      message: `Hi ${booking.customerName}, your booking for ${service} has been moved to ${when}. Reference: ${ref}. Amount: ${money(booking.totalPrice)}. Please reply to this message or contact the shop if the new time does not work for you.`,
     };
   }
 

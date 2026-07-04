@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { queueCustomerBookingNotification } from "@/lib/customer-notifications";
-import { queueCustomerWebsiteNotification, queueStaffBookingEmail } from "@/lib/internal-notifications";
+import { queueCustomerWebsiteNotification, queueOwnerBookingEmail, queueStaffBookingEmail } from "@/lib/internal-notifications";
 
 type PrismaTx = Omit<
   PrismaClient,
@@ -66,6 +66,15 @@ export async function notifyBookingCreated(tx: PrismaTx, booking: any, paymentTr
       await queueStaffBookingEmail(tx, booking, "New booking request for you", "Open Staff Portal to accept if you can take this job.", targets);
     }
   }
+  const ownerExtra = depositRequired
+    ? `Anti-spam protection requires a deposit before staff assignment.${reasonText}${requestedStaffName ? ` Requested staff:${requestedStaffName.replace(/^\s+/, "")}` : ""}`
+    : `${requestedStaffName ? `Requested staff:${requestedStaffName.replace(/^\s+/, "")}` : "No requested staff."} Review in Admin Calendar or let staff accept from Staff Portal.`;
+  await queueOwnerBookingEmail(
+    tx,
+    booking,
+    depositRequired ? "New booking needs deposit" : "New booking request",
+    ownerExtra
+  );
   await queueCustomerBookingNotification(tx, { ...booking, paymentTransferUrl }, depositRequired ? "payment_transfer_link" : "booking_created");
 }
 
@@ -133,6 +142,14 @@ export async function notifyBookingStatusChanged(
       : [];
   if (staffEmailTargets.length) {
     await queueStaffBookingEmail(tx, booking, `Booking ${String(booking.status).toLowerCase()}`, booking.status === "CANCELLED" ? "This slot has been released." : "Check Staff Portal for the live schedule.", staffEmailTargets);
+  }
+
+  if (booking.status === "CONFIRMED") {
+    await queueOwnerBookingEmail(tx, booking, "Booking confirmed", `${booking.customerName}'s booking is confirmed for ${day} at ${booking.time}.`);
+  } else if (booking.status === "COMPLETED") {
+    await queueOwnerBookingEmail(tx, booking, "Booking completed", `${booking.customerName}'s appointment was marked completed.`);
+  } else if (booking.status === "NO_SHOW") {
+    await queueOwnerBookingEmail(tx, booking, "Booking marked no-show", `${booking.customerName}'s appointment was marked no-show.`);
   }
 
   if (booking.status === "CONFIRMED") {

@@ -8,6 +8,7 @@ import {
   verifyGoogleIdToken,
   verifyGoogleState,
 } from "@/lib/google-auth";
+import { ensureGoogleCalendarWatch } from "@/lib/google-calendar";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -30,10 +31,14 @@ export async function GET(req: NextRequest) {
     const { user, token } = session
       ? { user: session, token: null }
       : await createAppSessionFromGooglePayload(payload);
+
     if (calendar) {
       const staff = await prisma.staff.findFirst({ where: { email: user.email }, select: { id: true } });
-      const existing = await (prisma as any).googleCalendarConnection.findUnique({ where: { userId_calendarId: { userId: user.id, calendarId: "primary" } } }).catch(() => null);
-      await (prisma as any).googleCalendarConnection.upsert({
+      const existing = await (prisma as any).googleCalendarConnection.findUnique({
+        where: { userId_calendarId: { userId: user.id, calendarId: "primary" } },
+      }).catch(() => null);
+
+      const connection = await (prisma as any).googleCalendarConnection.upsert({
         where: { userId_calendarId: { userId: user.id, calendarId: "primary" } },
         update: {
           email: user.email,
@@ -41,6 +46,7 @@ export async function GET(req: NextRequest) {
           accessToken: googleToken.access_token || existing?.accessToken || null,
           refreshToken: googleToken.refresh_token || existing?.refreshToken || null,
           scope: googleToken.scope || existing?.scope || null,
+          calendarId: "primary",
           syncEnabled: true,
         },
         create: {
@@ -54,18 +60,50 @@ export async function GET(req: NextRequest) {
           syncEnabled: true,
         },
       }).catch(async (err: Error) => {
-        await (prisma as any).calendarSyncLog.create({ data: { direction: "OAUTH", status: "FAILED", message: err.message.slice(0, 500), staffId: staff?.id || null } }).catch(() => null);
+        await (prisma as any).calendarSyncLog.create({
+          data: {
+            direction: "OAUTH",
+            status: "FAILED",
+            message: err.message.slice(0, 500),
+            staffId: staff?.id || null,
+          },
+        }).catch(() => null);
+        throw err;
       });
 
       await (prisma as any).calendarSyncSetting.upsert({
         where: { id: "default" },
-        update: { ownerEmail: payload.email || user.email || undefined },
-        create: { id: "default", ownerEmail: payload.email || user.email || "" },
+        update: {
+          ownerEmail: payload.email || user.email || undefined,
+          ownerCalendarId: "primary",
+          syncEnabled: true,
+          googleSyncEnabled: true,
+        },
+        create: {
+          id: "default",
+          ownerEmail: payload.email || user.email || "",
+          ownerCalendarId: "primary",
+          syncEnabled: true,
+          googleSyncEnabled: true,
+        },
       }).catch(() => null);
+
+      let watchStatus = "ready";
+      let watchError = "";
+      try {
+        const watch = await ensureGoogleCalendarWatch(prisma as any, connection);
+        watchStatus = watch.ok ? (watch.skipped ? "ready" : "connected") : "failed";
+        watchError = String(watch.error || watch.reason || "").slice(0, 180);
+      } catch (watchErr) {
+        watchStatus = "failed";
+        watchError = (watchErr instanceof Error ? watchErr.message : String(watchErr)).slice(0, 180);
+      }
 
       return new NextResponse(googleCalendarCallbackHtml(next, {
         google_calendar: "connected",
         google_email: payload.email || user.email,
+        google_watch: watchStatus,
+        ...(watchError ? { google_watch_error: watchError } : {}),
       }), {
         headers: {
           "Content-Type": "text/html; charset=utf-8",
