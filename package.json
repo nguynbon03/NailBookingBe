@@ -12,7 +12,9 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "smoke:admin-live": "node scripts/smoke-admin-live.mjs",
-    "smoke:staff-live": "node scripts/smoke-staff-live.mjs"
+    "smoke:staff-live": "node scripts/smoke-staff-live.mjs",
+    "chatbot:index": "tsx scripts/index-chatbot-knowledge.ts",
+    "smoke:chatbot-rag": "tsx scripts/smoke-chatbot-rag.ts"
   },
   "dependencies": {
     "@langchain/core": "^1.2.1",

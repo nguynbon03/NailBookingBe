@@ -3,6 +3,7 @@ import * as path from "path";
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import { ChatOpenAI } from "@langchain/openai";
+import { retrieveKnowledge as retrieveKnowledgeRag } from "./chatbot-rag";
 
 export type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
 export type RetrievedChunk = { source: string; text: string; score: number };
@@ -409,7 +410,7 @@ async function prepareNode(state: ChatbotGraphStateType) {
   if (!latestUser) throw new Error("missing_user_message");
 
   const [chunks, soul] = await Promise.all([
-    retrieveKnowledge(latestUser, state.mode, 6),
+    retrieveKnowledgeRag(latestUser, state.mode, 6),
     fs.readFile(path.join(KNOWLEDGE_DIR, "SOUL.md"), "utf8").catch(() => ""),
   ]);
 
