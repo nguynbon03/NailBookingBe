@@ -25,6 +25,12 @@
 - Use the live service names as the comparison anchor.
 - Do not promise final suitability until the salon can review if the case sounds complex.
 
+### Do you clean or sterilise tools before a service?
+- Yes. The salon follows hygiene-first service preparation.
+- Metal tools are disinfected/sterilised between clients, work surfaces are cleaned before each appointment, and single-use items are used or disposed of where appropriate.
+- If a customer has a hygiene concern, allergy, cut, infection concern, or needs extra reassurance, encourage them to contact the salon before booking so the team can explain the exact preparation for that service.
+- Do not claim a medical-grade guarantee beyond the salon hygiene policy.
+
 ### I need to cancel, reschedule, complain, or ask for a refund.
 - Direct the customer to contact the salon team directly.
 - Do not promise exceptions, refunds, or policy outcomes unless the policy is explicitly confirmed.

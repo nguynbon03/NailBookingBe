@@ -39,6 +39,7 @@ export const bookingInclude = {
   staff: true,
   requestedStaff: true,
   user: { select: { id: true, email: true, name: true, role: true } },
+  review: true,
 };
 
 export async function syncBookingRevenue(tx: PrismaTx, booking: BookingForRevenue) {

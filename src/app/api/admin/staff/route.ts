@@ -78,8 +78,30 @@ async function upsertStaffLogin(data: { name: string; email: string; phone: stri
 }
 
 export async function GET() {
-  const staff = await prisma.staff.findMany({ orderBy: { name: "asc" } });
-  return NextResponse.json({ staff });
+  const [staff, groupedRatings, latestReviews] = await Promise.all([
+    prisma.staff.findMany({ orderBy: { name: "asc" } }),
+    prisma.staffReview.groupBy({ by: ["staffId"], _avg: { rating: true }, _count: { rating: true } }),
+    prisma.staffReview.findMany({
+      where: { publicComment: true, comment: { not: null } },
+      orderBy: { createdAt: "desc" },
+      distinct: ["staffId"],
+      select: { staffId: true, rating: true, comment: true, createdAt: true },
+    }),
+  ]);
+  const ratingByStaff = new Map(groupedRatings.map((item) => [item.staffId, item]));
+  const latestByStaff = new Map(latestReviews.map((item) => [item.staffId, item]));
+  return NextResponse.json({
+    staff: staff.map((item) => {
+      const rating = ratingByStaff.get(item.id);
+      const latestReview = latestByStaff.get(item.id);
+      return {
+        ...item,
+        ratingAverage: rating?._avg.rating ? Number(rating._avg.rating.toFixed(2)) : null,
+        ratingCount: rating?._count.rating || 0,
+        latestReview: latestReview ? { rating: latestReview.rating, comment: latestReview.comment, createdAt: latestReview.createdAt } : null,
+      };
+    }),
+  });
 }
 
 export async function POST(req: NextRequest) {
