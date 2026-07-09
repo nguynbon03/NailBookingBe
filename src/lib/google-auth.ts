@@ -36,11 +36,11 @@ function normalizedGoogleRedirect(value?: string) {
   const raw = String(value || "").trim() || fallback;
   const normalized = raw.replace("/api/google-calendar/callback", "/api/auth/callback/google");
   try {
-    const url = new URL(normalized);
-    if (url.hostname === "bookingnail.overpowers.agency" && url.protocol !== "https:") {
-      url.protocol = "https:";
-    }
-    return url.toString();
+    // Keep the exact configured protocol/host/path.
+    // Google OAuth redirect URIs must match the Console entry exactly;
+    // do not force http -> https here because some tunnel-hosted environments
+    // intentionally authorize the public http callback URL.
+    return new URL(normalized).toString();
   } catch {
     return normalized;
   }
