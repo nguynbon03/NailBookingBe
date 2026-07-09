@@ -8,6 +8,7 @@ import { retrieveKnowledgeTrace } from "./chatbot-rag";
 export type ChatMessage = { role: "user" | "assistant" | "system"; content: string };
 export type RetrievedChunk = { source: string; text: string; score: number };
 export type ChatbotMode = "customer" | "staff" | "admin";
+export type ResponseLanguage = "en" | "vi";
 
 const KNOWLEDGE_DIR = path.join(process.cwd(), "knowledge");
 const SUPPORTED_EXTS = new Set([".md", ".txt", ".json"]);
@@ -191,9 +192,19 @@ function apiKey() {
 function clientHeaders(baseURL: string) {
   if (!baseURL.includes("openrouter.ai")) return undefined;
   return {
-    "HTTP-Referer": "https://bookingnail.overpowers.agency",
+    "HTTP-Referer": envValue("PUBLIC_APP_URL", "NEXTAUTH_URL", "NEXT_PUBLIC_APP_URL") || "https://bookingnail.overpowers.agency",
     "X-Title": "Nail Lounge Assistant",
   };
+}
+
+function normalizeResponseLanguage(value?: string | null): ResponseLanguage {
+  const language = String(value || "").trim().toLowerCase();
+  if (["vi", "vn", "vietnamese", "tiếng việt", "tieng viet"].includes(language)) return "vi";
+  return "en";
+}
+
+function defaultResponseLanguage(): ResponseLanguage {
+  return normalizeResponseLanguage(envValue("SHOP_LANGUAGE", "CHATBOT_RESPONSE_LANGUAGE", "DEFAULT_LANGUAGE"));
 }
 
 function uniqueSources(chunks: RetrievedChunk[]) {
@@ -213,9 +224,12 @@ function compactSnapshot(text: string, maxLines = 10) {
   return picked.length ? picked.join("\n") : "No live snapshot is available right now.";
 }
 
-function modeInstructions(mode: ChatbotMode) {
+function modeInstructions(mode: ChatbotMode, responseLanguage: ResponseLanguage) {
+  const languageRule = responseLanguage === "vi"
+    ? "- Reply in natural Vietnamese only. Keep salon names, service names, prices, and booking references exact."
+    : "- Reply in natural English only.";
   const shared = [
-    "- Reply in natural English only.",
+    languageRule,
     "- Sound calm, helpful, and human.",
     "- Keep answers easy to read on a phone.",
     "- Never invent facts that are missing from the live snapshot or knowledge base.",
@@ -267,7 +281,7 @@ function buildKnowledgeContext(chunks: RetrievedChunk[]) {
 function buildSystemPrompt(state: ChatbotGraphStateType) {
   return [
     state.soul.trim(),
-    modeInstructions(state.mode),
+    modeInstructions(state.mode, state.responseLanguage),
     "Core response rules:",
     "- Use only the supplied knowledge, live service list, live operational snapshot, and conversation context.",
     "- Never invent prices, promotions, availability, policy exceptions, revenue totals, or booking status changes.",
@@ -289,14 +303,30 @@ function buildFallbackAnswer(options: {
   extraContext: string;
   imageDataUrl?: string | null;
   failureReason?: string;
+  responseLanguage: ResponseLanguage;
 }) {
-  const { latestUser, chunks, servicesText, mode, extraContext, imageDataUrl, failureReason } = options;
+  const { latestUser, chunks, servicesText, mode, extraContext, imageDataUrl, failureReason, responseLanguage } = options;
   const contextLines = compactSnapshot(extraContext, mode === "customer" ? 6 : 10);
   const knowledgeLines = chunks
     .slice(0, 3)
     .map((chunk) => `- ${chunk.text.replace(/\s+/g, " ").slice(0, 220)}…`)
     .join("\n");
   const serviceLines = lines(servicesText, 6).join("\n");
+
+  if (responseLanguage === "vi") {
+    const failureLine = failureReason ? `\n\nGhi chú hệ thống: ${failureReason}` : "";
+    const imageLine = imageDataUrl
+      ? "\n\nGhi chú ảnh: Tôi chỉ có thể đưa ra nhận xét hình ảnh thận trọng. Nếu có đau, viêm, chảy máu hoặc dấu hiệu y tế, hãy liên hệ trực tiếp salon trước khi làm dịch vụ."
+      : "";
+    if (mode === "admin") {
+      return `Hiện tại tôi chưa kết nối được mô hình AI trực tiếp, nên đây là câu trả lời vận hành tốt nhất cho “${latestUser}”.\n\nDữ liệu live:\n${contextLines}${knowledgeLines ? `\n\nKiến thức liên quan:\n${knowledgeLines}` : ""}${failureLine}`;
+    }
+    if (mode === "staff") {
+      return `Hiện tại tôi chưa kết nối được mô hình AI trực tiếp, nên đây là tóm tắt tốt nhất cho nhân viên về “${latestUser}”.\n\nDữ liệu live:\n${contextLines}${knowledgeLines ? `\n\nHướng dẫn liên quan:\n${knowledgeLines}` : ""}${failureLine}`;
+    }
+    return `Hiện tại tôi chưa kết nối được mô hình AI trực tiếp, nên đây là câu trả lời tốt nhất cho “${latestUser}”.\n\nThông tin tôi biết lúc này:\n${contextLines}${serviceLines ? `\n\nDịch vụ live:\n${serviceLines}` : ""}${knowledgeLines ? `\n\nHướng dẫn hữu ích:\n${knowledgeLines}` : ""}${imageLine}${failureLine}\n\nNếu cần câu trả lời chắc chắn, vui lòng dùng các nút liên hệ của salon.`;
+  }
+
   const failureLine = failureReason ? `\n\nModel note: ${failureReason}` : "";
   const imageLine = imageDataUrl
     ? "\n\nImage note: I can only give a cautious visual opinion here. For any painful, inflamed, bleeding, or medically concerning issue, please contact the salon team directly before treatment."
@@ -360,6 +390,10 @@ const ChatbotGraphState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => "customer",
   }),
+  responseLanguage: Annotation<ResponseLanguage>({
+    reducer: (_left, right) => right,
+    default: defaultResponseLanguage,
+  }),
   extraContext: Annotation<string>({
     reducer: (_left, right) => right,
     default: () => "",
@@ -414,7 +448,7 @@ async function prepareNode(state: ChatbotGraphStateType) {
   if (!latestUser) throw new Error("missing_user_message");
 
   const [{ chunks, engine }, soul] = await Promise.all([
-    retrieveKnowledgeTrace(latestUser, state.mode, 6),
+    retrieveKnowledgeTrace(latestUser, state.mode),
     fs.readFile(path.join(KNOWLEDGE_DIR, "SOUL.md"), "utf8").catch(() => ""),
   ]);
 
@@ -444,6 +478,7 @@ async function fallbackNode(state: ChatbotGraphStateType) {
       mode: state.mode,
       extraContext: state.extraContext,
       imageDataUrl: state.imageDataUrl,
+      responseLanguage: state.responseLanguage,
       failureReason: state.failureReason,
     }),
   };
@@ -489,6 +524,7 @@ async function llmNode(state: ChatbotGraphStateType) {
           mode: state.mode,
           extraContext: state.extraContext,
           imageDataUrl: state.imageDataUrl,
+          responseLanguage: state.responseLanguage,
           failureReason: "The model returned an empty answer.",
         }),
       failureReason: "",
@@ -505,6 +541,7 @@ async function llmNode(state: ChatbotGraphStateType) {
         mode: state.mode,
         extraContext: state.extraContext,
         imageDataUrl: state.imageDataUrl,
+        responseLanguage: state.responseLanguage,
         failureReason,
       }),
     };
@@ -530,12 +567,14 @@ export async function generateAssistantReply(options: {
   mode?: ChatbotMode;
   extraContext?: string;
   imageDataUrl?: string | null;
+  responseLanguage?: ResponseLanguage;
 }) {
   const result = await chatbotGraph.invoke({
     messages: options.messages,
     page: String(options.page || ""),
     servicesText: String(options.servicesText || "").trim(),
     mode: options.mode || "customer",
+    responseLanguage: options.responseLanguage || defaultResponseLanguage(),
     extraContext: String(options.extraContext || "").trim(),
     imageDataUrl: options.imageDataUrl || null,
   });

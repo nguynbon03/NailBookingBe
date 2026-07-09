@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { generateAssistantReply, type ChatMessage, type ChatbotMode } from "@/lib/chatbot";
+import { generateAssistantReply, type ChatMessage, type ChatbotMode, type ResponseLanguage } from "@/lib/chatbot";
 import { shouldCountRevenue } from "@/lib/booking-workflow";
 import { getAuthUser, isAdminRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type Body = { messages?: ChatMessage[]; page?: string; imageDataUrl?: string | null };
+type Body = { messages?: ChatMessage[]; page?: string; imageDataUrl?: string | null; language?: string; responseLanguage?: string; shopLanguage?: string };
 
 type SimpleBooking = {
   id: string;
@@ -27,6 +27,40 @@ function detectMode(page?: string, role?: string | null): ChatbotMode {
   if (currentPage.startsWith("/admin") || isAdminRole(role)) return "admin";
   if (currentPage.startsWith("/staff") || role === "STAFF") return "staff";
   return "customer";
+}
+
+function flagEnv(keys: string[], fallback = false) {
+  for (const key of keys) {
+    const value = String(process.env[key] || "").trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(value)) return true;
+    if (["0", "false", "no", "off"].includes(value)) return false;
+  }
+  return fallback;
+}
+
+function chatbotEnabled() {
+  const edition = String(process.env.APP_EDITION || "pro").trim().toLowerCase();
+  return flagEnv(["CHATBOT_ENABLED", "AI_CHATBOT_ENABLED"], edition !== "basic");
+}
+
+function responseLanguageFrom(value?: string | null): ResponseLanguage | null {
+  const language = String(value || "").trim().toLowerCase();
+  if (["vi", "vn", "vietnamese", "tiếng việt", "tieng viet"].includes(language)) return "vi";
+  if (["en", "english"].includes(language)) return "en";
+  return null;
+}
+
+function detectVietnamese(text: string) {
+  return /[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/i.test(text);
+}
+
+function resolveResponseLanguage(body: Body, messages: ChatMessage[]): ResponseLanguage {
+  const explicit = responseLanguageFrom(body.responseLanguage || body.language || body.shopLanguage);
+  if (explicit) return explicit;
+  const configured = responseLanguageFrom(process.env.SHOP_LANGUAGE || process.env.CHATBOT_RESPONSE_LANGUAGE || process.env.DEFAULT_LANGUAGE);
+  if (configured) return configured;
+  const latestUser = [...messages].reverse().find((item) => item.role === "user")?.content || "";
+  return detectVietnamese(latestUser) ? "vi" : "en";
 }
 
 function startOfDay(base = new Date()) {
@@ -320,6 +354,9 @@ async function buildCustomerSnapshot(authUser: Awaited<ReturnType<typeof getAuth
 
 export async function POST(req: NextRequest) {
   try {
+    if (!chatbotEnabled()) {
+      return NextResponse.json({ error: "Chat assistant is disabled for this plan" }, { status: 404 });
+    }
     const body = (await req.json().catch(() => ({}))) as Body;
     const messages = Array.isArray(body.messages)
       ? body.messages
@@ -353,6 +390,8 @@ export async function POST(req: NextRequest) {
         ? await buildStaffSnapshot(authUser)
         : await buildCustomerSnapshot(authUser);
 
+    const responseLanguage = resolveResponseLanguage(body, messages);
+
     const result = await generateAssistantReply({
       messages,
       page: body.page,
@@ -360,9 +399,10 @@ export async function POST(req: NextRequest) {
       mode,
       extraContext,
       imageDataUrl: body.imageDataUrl,
+      responseLanguage,
     });
 
-    return NextResponse.json({ ...result, mode });
+    return NextResponse.json({ ...result, mode, responseLanguage });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Chat assistant failed" },
