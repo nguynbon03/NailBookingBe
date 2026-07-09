@@ -13,13 +13,33 @@ import { ensureGoogleCalendarWatch } from "@/lib/google-calendar";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function publicBase(req: NextRequest) {
+  const configured = process.env.PUBLIC_APP_URL || process.env.NEXTAUTH_URL || process.env.FRONTEND_URL;
+  if (configured) return configured.replace(/\/$/, "");
+
+  const forwardedOrigin = req.headers.get("x-forwarded-origin");
+  if (forwardedOrigin && !forwardedOrigin.includes("0.0.0.0")) return forwardedOrigin.replace(/\/$/, "");
+
+  const forwardedHost = req.headers.get("x-forwarded-host");
+  if (forwardedHost && !forwardedHost.startsWith("0.0.0.0")) {
+    const proto = req.headers.get("x-forwarded-proto") || "https";
+    return `${proto}://${forwardedHost}`.replace(/\/$/, "");
+  }
+
+  return req.nextUrl.origin.replace(/\/$/, "");
+}
+
+function loginErrorRedirect(req: NextRequest, message: string) {
+  return NextResponse.redirect(new URL(`/login?google_error=${encodeURIComponent(message)}`, publicBase(req)));
+}
+
 export async function GET(req: NextRequest) {
   const error = req.nextUrl.searchParams.get("error");
-  if (error) return NextResponse.redirect(new URL(`/login?google_error=${encodeURIComponent(error)}`, req.nextUrl.origin));
+  if (error) return loginErrorRedirect(req, error);
 
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
-  if (!code || !state) return NextResponse.redirect(new URL("/login?google_error=missing_code", req.nextUrl.origin));
+  if (!code || !state) return loginErrorRedirect(req, "missing_code");
 
   try {
     const { next, calendar, actorUserId } = verifyGoogleState(state);
@@ -120,6 +140,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : "google_callback_failed";
-    return NextResponse.redirect(new URL(`/login?google_error=${encodeURIComponent(detail)}`, req.nextUrl.origin));
+    return loginErrorRedirect(req, detail);
   }
 }
