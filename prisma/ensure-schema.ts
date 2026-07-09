@@ -243,6 +243,33 @@ async function main() {
     CREATE INDEX IF NOT EXISTS "Booking_source_ip_created_idx" ON "Booking" ("sourceIp", "createdAt");
   `);
 
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "StaffReview" (
+      "id" TEXT PRIMARY KEY,
+      "bookingId" TEXT NOT NULL,
+      "staffId" TEXT NOT NULL,
+      "userId" TEXT,
+      "rating" INTEGER NOT NULL,
+      "comment" TEXT,
+      "publicComment" BOOLEAN NOT NULL DEFAULT true,
+      "source" TEXT NOT NULL DEFAULT 'CUSTOMER',
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "StaffReview" ADD COLUMN IF NOT EXISTS "bookingId" TEXT;`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "StaffReview" ADD COLUMN IF NOT EXISTS "staffId" TEXT;`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "StaffReview" ADD COLUMN IF NOT EXISTS "userId" TEXT;`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "StaffReview" ADD COLUMN IF NOT EXISTS "rating" INTEGER NOT NULL DEFAULT 5;`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "StaffReview" ADD COLUMN IF NOT EXISTS "comment" TEXT;`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "StaffReview" ADD COLUMN IF NOT EXISTS "publicComment" BOOLEAN NOT NULL DEFAULT true;`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "StaffReview" ADD COLUMN IF NOT EXISTS "source" TEXT NOT NULL DEFAULT 'CUSTOMER';`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "StaffReview" ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE "StaffReview" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;`);
+  await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "StaffReview_bookingId_key" ON "StaffReview" ("bookingId");`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "StaffReview_staff_rating_idx" ON "StaffReview" ("staffId", "rating");`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "StaffReview_createdAt_idx" ON "StaffReview" ("createdAt");`);
+
 
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "BookingProtectionSetting" (

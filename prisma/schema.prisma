@@ -21,9 +21,10 @@ model User {
   emailVerificationSentAt    DateTime?
   phoneVerifiedAt            DateTime?
   phoneVerificationSentAt    DateTime?
-  createdAt                  DateTime  @default(now())
-  updatedAt                  DateTime  @updatedAt
+  createdAt                  DateTime      @default(now())
+  updatedAt                  DateTime      @updatedAt
   bookings                   Booking[]
+  staffReviews               StaffReview[]
 }
 
 enum Role {
@@ -59,6 +60,7 @@ model Staff {
   requestedBookings Booking[]           @relation("RequestedStaff")
   availability      StaffAvailability[]
   leaveRequests     StaffLeaveRequest[]
+  reviews           StaffReview[]
 }
 
 model StaffLeaveRequest {
@@ -177,6 +179,26 @@ model Booking {
   staff                      Staff?           @relation("AssignedStaff", fields: [staffId], references: [id])
   requestedStaff             Staff?           @relation("RequestedStaff", fields: [requestedStaffId], references: [id])
   services                   BookingService[]
+  review                     StaffReview?
+}
+
+model StaffReview {
+  id            String   @id @default(cuid())
+  bookingId     String   @unique
+  staffId        String
+  userId         String?
+  rating         Int
+  comment        String?
+  publicComment  Boolean  @default(true)
+  source         String   @default("CUSTOMER")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  booking        Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  staff          Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  user           User?    @relation(fields: [userId], references: [id])
+
+  @@index([staffId, rating])
+  @@index([createdAt])
 }
 
 model BookingService {

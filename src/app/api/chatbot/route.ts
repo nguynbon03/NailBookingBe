@@ -205,6 +205,17 @@ async function buildAdminSnapshot() {
   const todayCancelled = todayBookings.filter((item) => item.status === "CANCELLED").length;
   const unassignedCount = todayBookings.filter((item) => !item.staffId).length;
   const usedPromoCodes = promoCodes.reduce((sum, promo) => sum + Number(promo.usedCount || 0), 0);
+  const staffRatings = await prisma.staffReview.groupBy({
+    by: ["staffId"],
+    _avg: { rating: true },
+    _count: { rating: true },
+    orderBy: [{ _avg: { rating: "desc" } }, { _count: { rating: "desc" } }],
+    take: 5,
+  }).catch(() => []);
+  const ratedStaff = staffRatings.length
+    ? await prisma.staff.findMany({ where: { id: { in: staffRatings.map((item) => item.staffId) } }, select: { id: true, name: true, role: true } }).catch(() => [])
+    : [];
+  const ratedStaffById = new Map(ratedStaff.map((item) => [item.id, item]));
 
   const lines = [
     "ADMIN LIVE DATABASE CONTEXT",
@@ -228,6 +239,17 @@ async function buildAdminSnapshot() {
       const remaining = promo.usageLimit == null ? "unlimited" : String(Math.max(0, Number(promo.usageLimit) - Number(promo.usedCount || 0)));
       lines.push(`- ${promo.code}: ${promo.discountPercent}% · ${promo.active ? "active" : "inactive"} · used ${promo.usedCount}${promo.usageLimit == null ? "" : `/${promo.usageLimit}`} · remaining ${remaining}`);
     });
+  }
+
+  if (staffRatings.length) {
+    lines.push("Staff rating leaderboard (customer feedback, 1-5 stars):");
+    staffRatings.forEach((rating) => {
+      const staff = ratedStaffById.get(rating.staffId);
+      if (!staff) return;
+      lines.push(`- ${staff.name} (${staff.role}): ${Number(rating._avg.rating || 0).toFixed(2)}/5 from ${rating._count.rating} review(s)`);
+    });
+  } else {
+    lines.push("Staff rating leaderboard: no customer staff feedback submitted yet.");
   }
 
   if (todayBookings.length) {
@@ -265,7 +287,7 @@ async function buildStaffSnapshot(authUser: Awaited<ReturnType<typeof getAuthUse
   const monthStart = startOfMonth();
   const weekday = todayStart.getDay();
 
-  const [todayBookings, monthBookings, upcomingBookings, activeLeaves, todayAvailability] = await Promise.all([
+  const [todayBookings, monthBookings, upcomingBookings, activeLeaves, todayAvailability, staffRating] = await Promise.all([
     prisma.booking.findMany({
       where: { archivedAt: null, staffId: staffProfile.id, date: { gte: todayStart, lte: todayEnd } },
       orderBy: [{ time: "asc" }, { createdAt: "asc" }],
@@ -326,6 +348,7 @@ async function buildStaffSnapshot(authUser: Awaited<ReturnType<typeof getAuthUse
       orderBy: [{ date: "asc" }, { startTime: "asc" }],
       select: { startTime: true, endTime: true, date: true, dayOfWeek: true },
     }),
+    prisma.staffReview.aggregate({ where: { staffId: staffProfile.id }, _avg: { rating: true }, _count: { rating: true } }),
   ]);
 
   const todayRevenue = sumRevenue(todayBookings);
@@ -341,6 +364,7 @@ async function buildStaffSnapshot(authUser: Awaited<ReturnType<typeof getAuthUse
     `Month counted revenue: ${money(monthRevenue)}`,
     `Pending leave tickets: ${pendingLeaveCount}`,
     `Approved/current leave tickets: ${approvedLeaveCount}`,
+    `Customer feedback rating: ${staffRating._count.rating ? `${Number(staffRating._avg.rating || 0).toFixed(2)}/5 from ${staffRating._count.rating} review(s)` : "No customer reviews yet"}`,
     `Today's availability: ${todayAvailability.length ? todayAvailability.map((slot) => `${slot.startTime}-${slot.endTime}`).join(", ") : "No availability added yet"}`,
   ];
 
