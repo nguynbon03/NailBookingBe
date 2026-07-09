@@ -28,8 +28,10 @@ const CORPUS_TTL_MS = 60_000;
 const QDRANT_SYNC_TTL_MS = 5 * 60_000;
 const HASH_VECTOR_SIZE = numericEnv(["CHATBOT_HASH_VECTOR_DIM", "QDRANT_HASH_VECTOR_DIM"], 384);
 const DEFAULT_TOP_K = numericEnv(["CHATBOT_TOP_K", "QDRANT_TOP_K"], 8);
-const DEFAULT_CHUNK_SIZE = numericEnv(["CHATBOT_CHUNK_SIZE", "QDRANT_CHUNK_SIZE"], 720);
-const DEFAULT_CHUNK_OVERLAP = numericEnv(["CHATBOT_CHUNK_OVERLAP", "QDRANT_CHUNK_OVERLAP"], 160);
+// Match the Qdrant/LangChain RAG reference pattern:
+// RecursiveCharacterTextSplitter(chunk_size=512, chunk_overlap=50)
+const DEFAULT_CHUNK_SIZE = numericEnv(["CHATBOT_CHUNK_SIZE", "QDRANT_CHUNK_SIZE"], 512);
+const DEFAULT_CHUNK_OVERLAP = numericEnv(["CHATBOT_CHUNK_OVERLAP", "QDRANT_CHUNK_OVERLAP"], 50);
 const QDRANT_COLLECTION = envValue("QDRANT_COLLECTION", "CHATBOT_QDRANT_COLLECTION") || "nailbooking-knowledge-v2";
 const QDRANT_APP_TAG = envValue("QDRANT_APP_TAG", "CHATBOT_QDRANT_APP_TAG") || `nailbooking-chatbot-${envValue("APP_EDITION") || "pro"}`;
 

@@ -12,7 +12,7 @@ export type ResponseLanguage = "en" | "vi";
 
 const KNOWLEDGE_DIR = path.join(process.cwd(), "knowledge");
 const SUPPORTED_EXTS = new Set([".md", ".txt", ".json"]);
-const DEFAULT_TEXT_MODEL = "deepseek-v4-pro";
+const DEFAULT_TEXT_MODEL = "kimi-k2.6";
 const DEFAULT_VISION_MODEL = "gemma3:12b";
 const CORPUS_TTL_MS = 60_000;
 
