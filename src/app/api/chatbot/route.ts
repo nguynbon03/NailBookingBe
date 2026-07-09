@@ -22,10 +22,9 @@ type SimpleBooking = {
   services?: Array<{ service?: { name?: string | null } | null }>;
 };
 
-function detectMode(page?: string, role?: string | null): ChatbotMode {
-  const currentPage = String(page || "").toLowerCase();
-  if (currentPage.startsWith("/admin") || isAdminRole(role)) return "admin";
-  if (currentPage.startsWith("/staff") || role === "STAFF") return "staff";
+function detectMode(_page?: string, role?: string | null): ChatbotMode {
+  if (isAdminRole(role)) return "admin";
+  if (role === "STAFF") return "staff";
   return "customer";
 }
 
@@ -111,12 +110,37 @@ async function buildAdminSnapshot() {
   const todayStart = startOfDay();
   const todayEnd = endOfDay();
   const monthStart = startOfMonth();
+  const now = new Date();
 
-  const [todayBookings, monthBookings, activeStaffCount, unreadAdminTickets, pendingLeaveCount, pendingLeaves, approvedUpcomingLeaves] = await Promise.all([
+  const [
+    todayBookings,
+    monthBookings,
+    activeStaffCount,
+    totalStaffCount,
+    unreadAdminTickets,
+    pendingLeaveCount,
+    pendingLeaves,
+    approvedUpcomingLeaves,
+    totalUsers,
+    adminUsers,
+    managerUsers,
+    staffUsers,
+    customerUsers,
+    verifiedEmailUsers,
+    verifiedPhoneUsers,
+    totalPromoCodes,
+    activePromoCodes,
+    expiredPromoCodes,
+    promoCodes,
+    totalServices,
+    activeServices,
+    calendarConnections,
+    enabledCalendarConnections,
+  ] = await Promise.all([
     prisma.booking.findMany({
       where: { archivedAt: null, date: { gte: todayStart, lte: todayEnd } },
       orderBy: [{ time: "asc" }, { createdAt: "asc" }],
-      take: 8,
+      take: 12,
       select: {
         id: true,
         customerName: true,
@@ -135,20 +159,42 @@ async function buildAdminSnapshot() {
       select: { id: true, customerName: true, date: true, time: true, status: true, totalPrice: true, staffId: true },
     }),
     prisma.staff.count({ where: { active: true } }),
+    prisma.staff.count(),
     prisma.notification.count({ where: { audience: "ADMIN", read: false } }),
     prisma.staffLeaveRequest.count({ where: { status: "PENDING" } }),
     prisma.staffLeaveRequest.findMany({
       where: { status: "PENDING" },
       include: { staff: { select: { name: true, role: true } } },
       orderBy: [{ startDate: "asc" }, { createdAt: "desc" }],
-      take: 4,
+      take: 6,
     }),
     prisma.staffLeaveRequest.findMany({
       where: { status: "APPROVED", endDate: { gte: todayStart } },
       include: { staff: { select: { name: true, role: true } } },
       orderBy: [{ startDate: "asc" }, { createdAt: "desc" }],
-      take: 4,
+      take: 6,
     }),
+    prisma.user.count(),
+    prisma.user.count({ where: { role: "ADMIN" } }),
+    prisma.user.count({ where: { role: "MANAGER" } }),
+    prisma.user.count({ where: { role: "STAFF" } }),
+    prisma.user.count({ where: { role: "CUSTOMER" } }),
+    prisma.user.count({ where: { emailVerifiedAt: { not: null } } }),
+    prisma.user.count({ where: { phoneVerifiedAt: { not: null } } }),
+    prisma.promoCode.count(),
+    prisma.promoCode.count({
+      where: {
+        active: true,
+        OR: [{ startsAt: null }, { startsAt: { lte: now } }],
+        AND: [{ OR: [{ endsAt: null }, { endsAt: { gte: now } }] }],
+      },
+    }),
+    prisma.promoCode.count({ where: { endsAt: { lt: now } } }),
+    prisma.promoCode.findMany({ orderBy: [{ active: "desc" }, { usedCount: "desc" }, { createdAt: "desc" }], take: 8 }),
+    prisma.service.count(),
+    prisma.service.count({ where: { active: true } }),
+    prisma.googleCalendarConnection.count(),
+    prisma.googleCalendarConnection.count({ where: { syncEnabled: true } }),
   ]);
 
   const todayRevenue = sumRevenue(todayBookings);
@@ -156,22 +202,37 @@ async function buildAdminSnapshot() {
   const todayPending = todayBookings.filter((item) => item.status === "PENDING").length;
   const todayConfirmed = todayBookings.filter((item) => item.status === "CONFIRMED").length;
   const todayCompleted = todayBookings.filter((item) => item.status === "COMPLETED").length;
+  const todayCancelled = todayBookings.filter((item) => item.status === "CANCELLED").length;
   const unassignedCount = todayBookings.filter((item) => !item.staffId).length;
+  const usedPromoCodes = promoCodes.reduce((sum, promo) => sum + Number(promo.usedCount || 0), 0);
 
   const lines = [
-    "ADMIN LIVE SNAPSHOT",
+    "ADMIN LIVE DATABASE CONTEXT",
     `Today revenue counted: ${money(todayRevenue)}`,
     `Month revenue counted: ${money(monthRevenue)}`,
-    `Today bookings: ${todayBookings.length} total (${todayPending} pending, ${todayConfirmed} confirmed, ${todayCompleted} completed)` ,
+    `Today bookings: ${todayBookings.length} total (${todayPending} pending, ${todayConfirmed} confirmed, ${todayCompleted} completed, ${todayCancelled} cancelled)` ,
     `Unassigned bookings today: ${unassignedCount}`,
+    `Accounts total: ${totalUsers} (admins ${adminUsers}, managers ${managerUsers}, staff users ${staffUsers}, customers ${customerUsers})`,
+    `Verified accounts: email ${verifiedEmailUsers}, phone ${verifiedPhoneUsers}`,
+    `Staff profiles: ${activeStaffCount} active / ${totalStaffCount} total`,
+    `Services: ${activeServices} active / ${totalServices} total`,
+    `Promo codes: ${totalPromoCodes} total, ${activePromoCodes} active now, ${expiredPromoCodes} expired, ${usedPromoCodes} total uses among top codes`,
+    `Google Calendar connections: ${enabledCalendarConnections} enabled / ${calendarConnections} total`,
     `Unread admin tickets: ${unreadAdminTickets}`,
-    `Active staff: ${activeStaffCount}`,
     `Pending leave tickets: ${pendingLeaveCount}`,
   ];
 
+  if (promoCodes.length) {
+    lines.push("Top promo codes:");
+    promoCodes.slice(0, 5).forEach((promo) => {
+      const remaining = promo.usageLimit == null ? "unlimited" : String(Math.max(0, Number(promo.usageLimit) - Number(promo.usedCount || 0)));
+      lines.push(`- ${promo.code}: ${promo.discountPercent}% · ${promo.active ? "active" : "inactive"} · used ${promo.usedCount}${promo.usageLimit == null ? "" : `/${promo.usageLimit}`} · remaining ${remaining}`);
+    });
+  }
+
   if (todayBookings.length) {
     lines.push("Next bookings today:");
-    todayBookings.slice(0, 4).forEach((booking) => lines.push(`- ${bookingLine(booking as SimpleBooking)}`));
+    todayBookings.slice(0, 6).forEach((booking) => lines.push(`- ${bookingLine(booking as SimpleBooking)}`));
   }
 
   if (pendingLeaves.length) {

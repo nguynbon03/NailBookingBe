@@ -232,7 +232,7 @@ function modeInstructions(mode: ChatbotMode, responseLanguage: ResponseLanguage)
     languageRule,
     "- Sound calm, helpful, and human.",
     "- Keep answers easy to read on a phone.",
-    "- Never invent facts that are missing from the live snapshot or knowledge base.",
+    "- Never invent facts that are missing from the live database context or knowledge base.",
     "- Separate confirmed facts from suggestions.",
     "- Treat uploaded images as visual reference only.",
     "- Never diagnose medical conditions or promise safety from a photo alone.",
@@ -245,7 +245,7 @@ function modeInstructions(mode: ChatbotMode, responseLanguage: ResponseLanguage)
       "- You are an internal operations copilot for the salon owner or manager.",
       "- Focus on revenue, booking pressure, staffing, leave, inbox priorities, and next actions.",
       "- Use live metrics/context first, then knowledge docs.",
-      "- If a requested metric is not in the current snapshot, say so plainly.",
+      "- If a requested metric is not in the current live database context, say exactly which metric is unavailable and what page/API should be checked.",
       ...shared,
     ].join("\n");
   }
@@ -288,7 +288,7 @@ function buildSystemPrompt(state: ChatbotGraphStateType) {
     "- If you are unsure, say what is known and what should be checked with the salon team.",
     state.page ? `Current page: ${state.page}` : "",
     state.servicesText ? `Live services:\n${state.servicesText}` : "",
-    state.extraContext ? `Live operational snapshot:\n${compactSnapshot(state.extraContext, 12)}` : "",
+    state.extraContext ? `Live database context:\n${compactSnapshot(state.extraContext, state.mode === "admin" ? 36 : 12)}` : "",
     `Knowledge context:\n${buildKnowledgeContext(state.chunks)}`,
   ]
     .filter(Boolean)
