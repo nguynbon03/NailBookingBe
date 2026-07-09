@@ -152,6 +152,36 @@ function calendarIdFor(settings: CalendarSettings | null, connection: GoogleConn
   return String(settings?.ownerCalendarId || connection.calendarId || DEFAULT_CALENDAR_ID).trim() || DEFAULT_CALENDAR_ID;
 }
 
+function normalizeInviteEmail(value: unknown) {
+  const email = String(value || "").trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "";
+  return email;
+}
+
+function attendeeEmails(booking: BookingLike, settings: CalendarSettings | null, connection?: GoogleConnection | null) {
+  const organizerEmail = normalizeInviteEmail(connection?.email);
+  const entries = [
+    { email: normalizeInviteEmail(booking.customerEmail), displayName: booking.customerName || "Customer" },
+    { email: normalizeInviteEmail(booking.staff?.email), displayName: booking.staff?.name || "Assigned staff" },
+    { email: normalizeInviteEmail(booking.requestedStaff?.email), displayName: booking.requestedStaff?.name || "Requested staff" },
+    { email: normalizeInviteEmail(settings?.ownerEmail), displayName: "Shop owner" },
+  ];
+  const seen = new Set<string>();
+  return entries
+    .filter((item) => item.email && item.email !== organizerEmail)
+    .filter((item) => {
+      if (seen.has(item.email)) return false;
+      seen.add(item.email);
+      return true;
+    })
+    .map((item) => ({ email: item.email, displayName: item.displayName }));
+}
+
+function googleEventsPath(calendarId: string, eventId?: string | null) {
+  const base = `/calendars/${encodeURIComponent(calendarId)}/events${eventId ? `/${encodeURIComponent(eventId)}` : ""}`;
+  return `${base}?sendUpdates=all`;
+}
+
 function parseWatchExpiration(value: unknown) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -199,10 +229,11 @@ function parseGoogleEventSlot(event: GoogleEventLike) {
   return londonDateTimeParts(parsed);
 }
 
-function eventPayload(booking: BookingLike, calendarId: string) {
+function eventPayload(booking: BookingLike, calendarId: string, settings: CalendarSettings | null, connection?: GoogleConnection | null) {
   const day = dayText(booking.date);
   const startDateTime = `${day}T${String(booking.time || "09:00")}:00`;
   const endDateTime = addMinutes(day, booking.time, totalDurationMinutes(booking));
+  const attendees = attendeeEmails(booking, settings, connection);
   const descriptionLines = [
     `Booking ID: ${booking.id}`,
     `Status: ${booking.status}`,
@@ -235,6 +266,13 @@ function eventPayload(booking: BookingLike, calendarId: string) {
       title: SHOP_NAME,
       url: bookingAdminUrl(booking.id),
     },
+    ...(attendees.length
+      ? {
+          attendees,
+          guestsCanInviteOthers: false,
+          guestsCanSeeOtherGuests: false,
+        }
+      : {}),
     extendedProperties: {
       private: {
         nailbookingBookingId: booking.id,
@@ -495,12 +533,12 @@ export async function syncBookingToGoogleCalendar(prisma: PrismaLike, booking: B
   }
 
   const calendarId = calendarIdFor(settings, connection);
-  const payload = eventPayload(booking, calendarId);
+  const payload = eventPayload(booking, calendarId, settings, connection);
 
   try {
     const event = booking.googleCalendarEventId
-      ? await googleRequest(prisma, connection, "PATCH", `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(String(booking.googleCalendarEventId))}`, payload)
-      : await googleRequest(prisma, connection, "POST", `/calendars/${encodeURIComponent(calendarId)}/events`, payload);
+      ? await googleRequest(prisma, connection, "PATCH", googleEventsPath(calendarId, String(booking.googleCalendarEventId)), payload)
+      : await googleRequest(prisma, connection, "POST", googleEventsPath(calendarId), payload);
 
     const eventId = String(event?.id || booking.googleCalendarEventId || "").trim() || null;
     await persistSyncState(prisma, booking, { eventId, error: null });
@@ -547,7 +585,7 @@ export async function cancelGoogleCalendarBooking(prisma: PrismaLike, booking: B
   const calendarId = calendarIdFor(settings, connection);
 
   try {
-    await googleRequest(prisma, connection, "DELETE", `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(String(booking.googleCalendarEventId))}`);
+    await googleRequest(prisma, connection, "DELETE", googleEventsPath(calendarId, String(booking.googleCalendarEventId)));
     await persistSyncState(prisma, booking, { eventId: null, error: null });
     await markConnectionSynced(prisma, connection);
     await ensureGoogleCalendarWatch(prisma, connection).catch(() => null);
