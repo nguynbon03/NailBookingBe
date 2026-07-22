@@ -59,8 +59,9 @@ function resolveFilters(req: NextRequest) {
 
   const today = startOfUtcDay(new Date());
   const defaultStart = addDays(today, -13);
+  const endInclusive = addDays(today, 1); // include today's bookings
   const rawFrom = parseDate(search.get("fromDate")) || defaultStart;
-  const rawTo = parseDate(search.get("toDate")) || today;
+  const rawTo = parseDate(search.get("toDate")) || endInclusive;
   const safeStart = rawFrom <= rawTo ? rawFrom : rawTo;
   const safeTo = rawFrom <= rawTo ? rawTo : rawFrom;
   const endExclusive = addDays(safeTo, 1);
