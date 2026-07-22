@@ -95,11 +95,15 @@ async function sendInfobipSMS(phone: string, otp: string) {
     });
 
     const data = await response.json().catch(() => ({}));
+    // Infobip returns HTTP 200 even when messages are rejected — check body status
+    const msgStatus = data?.messages?.[0]?.status;
+    const rejected = msgStatus?.groupName === "REJECTED" || msgStatus?.groupId === 5;
+    const success = response.ok && !rejected;
     return {
-      success: response.ok,
+      success,
       skipped: false,
       messageId: data?.messages?.[0]?.messageId,
-      error: response.ok ? undefined : data?.requestError?.serviceException?.text || data?.error || `Infobip HTTP ${response.status}`,
+      error: success ? undefined : msgStatus?.description || data?.requestError?.serviceException?.text || data?.error || `Infobip HTTP ${response.status}`,
     };
   } catch (error: any) {
     return { success: false, skipped: false, error: error?.name === "AbortError" ? "Infobip SMS timeout" : error?.message || "Infobip SMS failed" };
