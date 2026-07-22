@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
     const availableCapacity = await availableCapacityAt(prisma, requestedDate, time, totalDuration, staffId ? String(staffId) : null);
     if (availableCapacity < numPeople) {
       return NextResponse.json({
-        error: `Only ${availableCapacity} staff-capacity slot${availableCapacity === 1 ? "" : "s"} left for this time. Please reduce the number of people or choose another time.`,
+        error: `Only ${availableCapacity} technician${availableCapacity === 1 ? " is" : "s are"} free at this time. Please reduce the number of people or choose another time.`,
         availableCapacity,
       }, { status: 409 });
     }
