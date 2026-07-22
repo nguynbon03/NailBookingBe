@@ -288,8 +288,8 @@ export async function PUT(req: NextRequest) {
     if (status === "CONFIRMED") {
       extraData.staffId = confirmedStaffId || null;
       extraData.paymentHoldStaffId = null;
-      extraData.paymentConfirmedAt = target.depositRequired ? (target.paymentConfirmedAt || new Date()) : null;
-      extraData.paymentConfirmedBy = target.depositRequired ? (authUser.name || authUser.email) : null;
+      extraData.paymentConfirmedAt = target.paymentConfirmedAt || new Date();
+      extraData.paymentConfirmedBy = authUser.name || authUser.email;
       extraData.paymentReference = target.paymentReference || bookingReference(target.id);
     }
     if (status === "PENDING") {
