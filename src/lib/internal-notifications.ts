@@ -88,11 +88,33 @@ async function queueInternalEmail(
 export async function queueOwnerBookingEmail(tx: PrismaTx, booking: BookingLike, subject: string, extra = "") {
   const recipients = await ownerEmails(tx);
   if (!recipients.length) return;
-  const message = `${subject}\n\n${bookingSummaryLine(booking)}\nCustomer email: ${booking.customerEmail || "-"}\nCustomer phone: ${booking.customerPhone || "-"}${extra ? `\n\n${extra}` : ""}\n\nOpen admin calendar/inbox: ${process.env.PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "https://bookingnail.overpowers.agency"}/admin/calendar`;
+  const adminUrl = process.env.PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "https://bookingnail.overpowers.agency";
+  const when = `${dayText(booking.date)} at ${booking.time}`;
+  const services = servicesText(booking);
+  const price = money(booking.totalPrice);
+  const requestedStaffName = booking.requestedStaff?.name || "";
+
+  const message = [
+    `New booking received.`,
+    ``,
+    `Customer: ${booking.customerName}`,
+    `Phone: ${booking.customerPhone || "-"}`,
+    `Email: ${booking.customerEmail || "-"}`,
+    `Service: ${services}`,
+    `Date: ${when}`,
+    `Price: ${price}`,
+    `Status: ${booking.status || "PENDING"}`,
+    requestedStaffName ? `Requested staff: ${requestedStaffName}` : `Requested staff: Any available`,
+    ``,
+    extra ? extra : `Please review and confirm this booking at your earliest convenience.`,
+    ``,
+    `View booking details: ${adminUrl}/admin/bookings`,
+  ].join("\n");
+
   await Promise.all(recipients.map((recipient) => queueInternalEmail(tx, {
     recipient,
     event: "internal_owner_booking_alert",
-    subject: `Nail Lounge owner alert: ${subject}`,
+    subject: `Nail Lounge: ${subject}`,
     message,
     bookingId: booking.id,
   })));
@@ -104,11 +126,28 @@ export async function queueStaffBookingEmail(tx: PrismaTx, booking: BookingLike,
   const staff = await tx.staff.findMany({ where: { id: { in: ids } }, select: { id: true, email: true, name: true, active: true } });
   const recipients = uniq(staff.filter((item) => item.active !== false).map((item) => item.email));
   if (!recipients.length) return;
-  const message = `${subject}\n\n${bookingSummaryLine(booking)}\nCustomer phone: ${booking.customerPhone || "-"}${extra ? `\n\n${extra}` : ""}\n\nOpen Staff Portal: ${process.env.PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "https://bookingnail.overpowers.agency"}/staff`;
+  const staffUrl = process.env.PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "https://bookingnail.overpowers.agency";
+  const when = `${dayText(booking.date)} at ${booking.time}`;
+  const services = servicesText(booking);
+
+  const message = [
+    `You have a new booking request.`,
+    ``,
+    `Customer: ${booking.customerName}`,
+    `Phone: ${booking.customerPhone || "-"}`,
+    `Service: ${services}`,
+    `Date: ${when}`,
+    `Status: ${booking.status || "PENDING"}`,
+    ``,
+    extra ? extra : `Please accept this booking from Staff Portal if you are available.`,
+    ``,
+    `Open Staff Portal: ${staffUrl}/staff`,
+  ].join("\n");
+
   await Promise.all(recipients.map((recipient) => queueInternalEmail(tx, {
     recipient,
     event: "internal_staff_booking_alert",
-    subject: `Nail Lounge staff alert: ${subject}`,
+    subject: `Nail Lounge: ${subject}`,
     message,
     bookingId: booking.id,
   })));
